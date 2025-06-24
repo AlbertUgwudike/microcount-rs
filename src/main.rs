@@ -1,11 +1,17 @@
-use iced::{ Application, Command, Element, executor, Settings, Theme};
-use iced::widget::{ container };
+use iced::widget::{column, container};
+use iced::{executor, Application, Command, Element, Settings, Theme};
 
-pub mod page;
-use page::{ register, select_images };
+pub mod component;
+use component::{navigator, register, select_images};
 
-use crate::page::register::RegisterMessage;
-use crate::page::select_images::SelectImagesMessage;
+pub mod data;
+use data::model;
+
+pub mod message;
+use message::{Message, NavigationMessage};
+
+use Message::{Navigate, Register, SelectImages};
+use NavigationMessage::{GoToRegister, GoToSelectImages};
 
 pub fn main() -> iced::Result {
     Microcount::run(Settings::default())
@@ -14,25 +20,16 @@ pub fn main() -> iced::Result {
 #[derive(Debug)]
 pub enum Page {
     SelectImages,
-    Register
-}
-
-#[derive(Debug)]
-pub enum Message {
-    GoSelectImages,
-    IncrementSelectImages,
-    DecrementSelectImage,
-
-    GoRegister,
-    IncrementRegister,
-    DecrementRegister,
+    Register,
 }
 
 #[derive(Debug)]
 struct Microcount {
+    model: model::Model,
+    navigator_bar: navigator::NavigatorBar,
     select_images_page: select_images::SelectImagesPage,
     register_page: register::RegisterPage,
-    selected_page: Page
+    selected_page: Page,
 }
 
 impl Application for Microcount {
@@ -44,7 +41,18 @@ impl Application for Microcount {
     fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
         let select_images_page = select_images::SelectImagesPage::new();
         let register_page = register::RegisterPage::new();
-        (Self { select_images_page, register_page, selected_page: Page::SelectImages } , Command::none())
+        let navigator_bar = navigator::NavigatorBar::new();
+        let model = model::Model::new();
+        (
+            Self {
+                model,
+                select_images_page,
+                register_page,
+                navigator_bar,
+                selected_page: Page::SelectImages,
+            },
+            Command::none(),
+        )
     }
 
     fn title(&self) -> String {
@@ -53,28 +61,20 @@ impl Application for Microcount {
 
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
-            Message::GoSelectImages => {
+            Navigate(GoToSelectImages) => {
                 self.selected_page = Page::SelectImages;
             }
 
-            Message::IncrementSelectImages => {
-                self.select_images_page.update(select_images::SelectImagesMessage::Increment);
-            }
-
-            Message::DecrementSelectImage => {
-                self.select_images_page.update(select_images::SelectImagesMessage::Decrement);
-            }
-
-            Message::GoRegister => {
+            Navigate(GoToRegister) => {
                 self.selected_page = Page::Register;
             }
 
-            Message::IncrementRegister => {
-                self.register_page.update(register::RegisterMessage::IncrementTen);
+            SelectImages(msg) => {
+                self.select_images_page.update(msg);
             }
 
-            Message::DecrementRegister => {
-                self.register_page.update(register::RegisterMessage::DecrementFive);
+            Register(msg) => {
+                self.register_page.update(msg);
             }
         }
 
@@ -82,24 +82,12 @@ impl Application for Microcount {
     }
 
     fn view(&self) -> Element<Self::Message> {
-        match &self.selected_page {
-            Page::SelectImages => {
-                container(self.select_images_page.view().map(|msg|{
-                    match msg {
-                        SelectImagesMessage::Increment => Message::IncrementSelectImages,
-                        SelectImagesMessage::Decrement => Message::DecrementSelectImage,
-                        SelectImagesMessage::GoRegister => Message::GoRegister
-                    }
-                })).into()
-            },
+        let navigator_bar = self.navigator_bar.view();
+        let page = match &self.selected_page {
+            Page::SelectImages => container(self.select_images_page.view()),
+            Page::Register => container(self.register_page.view()),
+        };
 
-            Page::Register => container(self.register_page.view().map(|msg|{
-                    match msg {
-                        RegisterMessage::IncrementTen => Message::IncrementRegister,
-                        RegisterMessage::DecrementFive => Message::DecrementRegister,
-                        RegisterMessage::GoSelectImages => Message::GoSelectImages
-                    }
-            })).into(),
-        }
+        container(column![navigator_bar, page]).into()
     }
 }
