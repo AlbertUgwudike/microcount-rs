@@ -3,7 +3,7 @@ use iced::Element;
 
 use crate::message::{Message, NavigationMessage};
 use Message::Navigate;
-use NavigationMessage::{GoToRegister, GoToSelectImages};
+use NavigationMessage::{GoToRegister, GoToSelectImages, GoToHome};
 
 #[derive(Default, Debug)]
 pub struct NavigatorBar;
@@ -16,6 +16,9 @@ impl NavigatorBar {
     pub fn view<'a>(&self) -> Element<'a, Message> {
         container(
             row![
+                button("Home")
+                    .on_press(Navigate(GoToHome))
+                    .padding(5),
                 button("Select Images")
                     .on_press(Navigate(GoToSelectImages))
                     .padding(5),
