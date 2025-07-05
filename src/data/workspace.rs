@@ -1,12 +1,18 @@
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
 use crate::data::ImageMetadata;
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Workspace {
-    images: Vec<ImageMetadata>,
+    pub dir_name: String,
+    images: Vec<ImageMetadata> ,
 }
 
+
 impl Workspace {
-    pub fn new() -> Workspace {
-        Workspace { images: vec![] }
+    pub fn new(dir_name: String) -> Workspace {
+        Workspace { images: vec![], dir_name }
     }
 }

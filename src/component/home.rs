@@ -1,3 +1,4 @@
+use iced::futures::io;
 use iced::widget::image::{viewer, Handle, Viewer};
 use iced::widget::{button, column, container, Image};
 use iced::Alignment::Center;
@@ -5,8 +6,11 @@ use iced::Element;
 use iced::Length;
 use serde::{Serialize, Deserialize};
 use rfd::FileDialog;
-use std::{fs, os, path};
+use std::io::Error;
+use std::path::PathBuf;
+use std::{fs};
 
+use crate::data::Workspace;
 use crate::message::{Message, HomeMessage};
 
 use Message::Home;
@@ -20,17 +24,6 @@ pub struct HomePage {
 impl HomePage {
     pub fn new() -> Self {
         HomePage { value: 0 }
-    }
-
-    pub fn update(&mut self, message: HomeMessage) {
-        match message {
-            HomeMessage::CreateWorkspace => {
-                self.create_workspace()
-            }
-            HomeMessage::LoadWorkspace => {
-                self.value -= 1;
-            }
-        }
     }
 
     pub fn view<'a>(&self) -> Element<'a, Message> {
@@ -48,17 +41,5 @@ impl HomePage {
             .align_items(Center),
         )
         .into()
-    }
-
-    fn create_workspace(&self) {
-        let folder = FileDialog::new()
-            .set_directory("/")
-            .save_file().unwrap();
-
-        // fs::create_dir(folder);
-
-        // let ws_file = folder.as_ref().join("ws.json");
-
-        print!("{:?}", folder);
     }
 }

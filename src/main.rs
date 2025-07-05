@@ -14,6 +14,7 @@ use Message::{Navigate, Register, SelectImages, Home};
 use NavigationMessage::{GoToRegister, GoToSelectImages, GoToHome};
 
 use crate::component::HomePage;
+use crate::message::SelectImagesMessage;
 
 pub fn main() -> iced::Result {
     Microcount::run(Settings::default())
@@ -79,10 +80,13 @@ impl Application for Microcount {
                 self.selected_page = Page::Home;
             }
 
-            Home(msg) => {
-                self.home_page.update(msg);
+            Home(message::HomeMessage::LoadWorkspace) => {
+                self.model.load_workspace();
             }
 
+            Home(message::HomeMessage::CreateWorkspace) => {
+                self.model.create_workspace();
+            }
             SelectImages(msg) => {
                 self.select_images_page.update(msg);
             }
