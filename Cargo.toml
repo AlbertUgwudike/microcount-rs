@@ -4,8 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-iced = {version = "0.12.1", features = ["image"] }
-imageproc = "0.25.0"
+eframe = "0.32.2"
+egui_extras = { version = "0.32.2", features = ["default", "image"] }
 rfd = "0.15.3"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+geo = "0.30.0"
+image = { version = "0.25.6", features = ["tiff"] }
+itertools = "0.14.0"
+ndarray = "0.16.1"
+ndarray-conv = "0.5.0"
+scirs2-ndimage = { version = "0.1.0-alpha.6", features = ["parallel", "simd"] }
+tiff = "0.10.0"
+tokio = { version = "1.46.1", features = ["full"] }

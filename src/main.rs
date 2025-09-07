@@ -1,112 +1,91 @@
-use iced::widget::{column, container};
-use iced::{executor, Application, Command, Element, Settings, Theme};
+pub mod algorithm;
+pub mod controller;
+pub mod model;
+pub mod utility;
+pub mod view;
 
-pub mod component;
-use component::{navigator, register, select_images, home};
+use eframe::egui::{self};
 
-pub mod data;
-use data::model;
+use crate::controller::{HomeController, SelectImagesController};
+use crate::model::Model;
+use crate::view::{ui_tab_home, ui_tab_select_images};
 
-pub mod message;
-use message::{Message, NavigationMessage};
+fn main() -> eframe::Result {
+    // env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([960.0, 600.0]),
+        ..Default::default()
+    };
 
-use Message::{Navigate, Register, SelectImages, Home};
-use NavigationMessage::{GoToRegister, GoToSelectImages, GoToHome};
-
-use crate::component::HomePage;
-use crate::message::SelectImagesMessage;
-
-pub fn main() -> iced::Result {
-    Microcount::run(Settings::default())
+    eframe::run_native(
+        "Microcount",
+        options,
+        Box::new(|cc| {
+            // This gives us image support:
+            egui_extras::install_image_loaders(&cc.egui_ctx);
+            Ok(Box::<MyApp>::default())
+        }),
+    )
 }
 
-#[derive(Debug)]
-pub enum Page {
+enum Tab {
     Home,
     SelectImages,
     Register,
+    SelectRegions,
+    Analyse,
 }
 
-#[derive(Debug)]
-struct Microcount {
+struct MyApp {
+    selected_tab: Tab,
     model: model::Model,
-    navigator_bar: navigator::NavigatorBar,
-    home_page: home::HomePage,
-    select_images_page: select_images::SelectImagesPage,
-    register_page: register::RegisterPage,
-    selected_page: Page,
+    home_controller: HomeController,
+    select_images_controller: SelectImagesController,
 }
 
-impl Application for Microcount {
-    type Executor = executor::Default;
-    type Message = Message;
-    type Theme = Theme;
-    type Flags = ();
-
-    fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
-        let home_page = home::HomePage::new();
-        let select_images_page = select_images::SelectImagesPage::new();
-        let register_page = register::RegisterPage::new();
-        let navigator_bar = navigator::NavigatorBar::new();
-        let model = model::Model::new();
-        (
-            Self {
-                model,
-                home_page,
-                select_images_page,
-                register_page,
-                navigator_bar,
-                selected_page: Page::Home,
-            },
-            Command::none(),
-        )
-    }
-
-    fn title(&self) -> String {
-        String::from("Microcount")
-    }
-
-    fn update(&mut self, message: Message) -> Command<Message> {
-        match message {
-            Navigate(GoToSelectImages) => {
-                self.selected_page = Page::SelectImages;
-            }
-
-            Navigate(GoToRegister) => {
-                self.selected_page = Page::Register;
-            }
-
-            Navigate(GoToHome) => {
-                self.selected_page = Page::Home;
-            }
-
-            Home(message::HomeMessage::LoadWorkspace) => {
-                self.model.load_workspace();
-            }
-
-            Home(message::HomeMessage::CreateWorkspace) => {
-                self.model.create_workspace();
-            }
-            SelectImages(msg) => {
-                self.select_images_page.update(msg);
-            }
-
-            Register(msg) => {
-                self.register_page.update(msg);
-            }
+impl Default for MyApp {
+    fn default() -> Self {
+        Self {
+            selected_tab: Tab::Home,
+            model: Model::new(),
+            home_controller: HomeController::new(),
+            select_images_controller: SelectImagesController::new(),
         }
-
-        Command::none()
     }
+}
 
-    fn view(&self) -> Element<Self::Message> {
-        let navigator_bar = self.navigator_bar.view();
-        let page = match &self.selected_page {
-            Page::Home => container(self.home_page.view()),
-            Page::SelectImages => container(self.select_images_page.view()),
-            Page::Register => container(self.register_page.view()),
-        };
+impl eframe::App for MyApp {
+    fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Home").clicked() {
+                    self.selected_tab = Tab::Home;
+                }
+                if ui.button("Select Images").clicked() {
+                    self.selected_tab = Tab::SelectImages;
+                }
+                if ui.button("Register").clicked() {
+                    self.selected_tab = Tab::Register;
+                }
+                if ui.button("Select Regions").clicked() {
+                    self.selected_tab = Tab::SelectRegions;
+                }
+                if ui.button("Analyse").clicked() {
+                    self.selected_tab = Tab::Analyse;
+                }
+            });
 
-        container(column![navigator_bar, page]).into()
+            ui.separator();
+
+            match self.selected_tab {
+                Tab::Home => ui_tab_home(&mut self.model, &mut self.home_controller, ui),
+                Tab::SelectImages => {
+                    ui_tab_select_images(&mut self.model, &mut self.select_images_controller, ui)
+                }
+                Tab::Register => {}
+                Tab::SelectRegions => {}
+                Tab::Analyse => {}
+            }
+        });
     }
 }
