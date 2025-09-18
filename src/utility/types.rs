@@ -34,3 +34,15 @@ impl std::fmt::Debug for Results {
         Ok(())
     }
 }
+
+#[derive(Debug)]
+pub struct TiffInfo {
+    pub dimensions: Pnt,
+    pub n_channels: usize,
+}
+
+#[derive(Debug)]
+pub enum TiffType {
+    MultiPanel { bps: usize, spp: usize, cc: usize },
+    SinglePanel { bps: usize, cc: usize },
+}

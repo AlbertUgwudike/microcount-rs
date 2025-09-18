@@ -1,9 +1,10 @@
+use geo::convert;
 use rfd::FileDialog;
-use std::fs;
 use std::io::Error;
 use std::path::Path;
+use std::{collections::HashSet, fs};
 
-use crate::model::{ImageMetadata, Workspace};
+use crate::model::{constants, ConvertStatus, ImageMetadata, Workspace};
 
 #[derive(Debug)]
 pub struct Model {
@@ -31,10 +32,10 @@ impl Model {
 
         let join_path = |slug: &str| folder.join(slug);
 
-        fs::create_dir(join_path("ws_converted"));
-        fs::create_dir(join_path("ws_downsampled"));
-        fs::create_dir(join_path("ws_processed"));
-        fs::create_dir(join_path("ws_masks"))
+        fs::create_dir(join_path(constants::DIR_CONVERT));
+        fs::create_dir(join_path(constants::DIR_DOWN));
+        fs::create_dir(join_path(constants::DIR_PROC));
+        fs::create_dir(join_path(constants::DIR_MASK))
     }
 
     pub fn load_workspace(&mut self) -> Result<(), Error> {
@@ -80,4 +81,23 @@ impl Model {
         };
         Ok(())
     }
+
+    pub fn convert_and_downsample(&mut self, idx: &HashSet<usize>) {
+        self.workspace.as_mut().map(|ws| {
+            idx.iter().map(|&i| {
+                ws.get_image(i).map(|img| {
+                    Self::convert(img);
+                    Self::downsample(img);
+                });
+            })
+        });
+    }
+
+    fn convert(img: &mut ImageMetadata) {
+        img.conversion_status = ConvertStatus::Converting;
+        std::fs::copy(img.src_fn(), img.conv_fn());
+        img.conversion_status = ConvertStatus::Converted;
+    }
+
+    fn downsample(img: &mut ImageMetadata) {}
 }

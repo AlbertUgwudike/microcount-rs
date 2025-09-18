@@ -14,7 +14,7 @@ use ndarray::prelude::*;
 use scirs2_ndimage::morphology::binary_opening;
 
 pub fn from_fn(file_name: &str, roi: ROI, settings: Settings) -> Results {
-    let channels = read_tiff_region(file_name, roi);
+    let channels = read_tiff_region(file_name, roi, 1).expect("ReadFailure");
     let iba1 = &(channels[2].map(|&a| a as f64));
     let cd68 = &(channels[1].map(|&a| a as f64));
 

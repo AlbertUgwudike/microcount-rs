@@ -8,7 +8,19 @@ use eframe::egui::{self};
 
 use crate::controller::{HomeController, SelectImagesController};
 use crate::model::Model;
+use crate::utility::io::{read_tiff_region, save_as_luma16};
 use crate::view::{ui_tab_home, ui_tab_select_images};
+
+// fn main() {
+//     let img_fn = "/Users/albert/projects/microcount-rs/src/assets/test.tiff";
+//     let img_fn = "/Users/albert/Downloads/example_ws/ws_converted/24_3_21_7.2_conv.tiff";
+//     let out_fn = "/Users/albert/projects/microcount-rs/src/assets/test_out.tiff";
+//     read_tiff_region(img_fn, (5000, 5000, 4000, 4000), 2)
+//         .map(|r| {
+//             save_as_luma16(&r[2], out_fn);
+//         })
+//         .map_err(|err| println!("{:?}", err));
+// }
 
 fn main() -> eframe::Result {
     // env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
