@@ -6,10 +6,10 @@ pub mod view;
 
 use eframe::egui::{self};
 
-use crate::controller::{HomeController, SelectImagesController};
+use crate::controller::{HomeController, RegisterController, SelectImagesController};
 use crate::model::Model;
 use crate::utility::io::{read_tiff_region, save_as_luma16};
-use crate::view::{ui_tab_home, ui_tab_select_images};
+use crate::view::{ui_tab_home, ui_tab_register, ui_tab_select_images};
 
 // fn main() {
 //     let img_fn = "/Users/albert/projects/microcount-rs/src/assets/test.tiff";
@@ -53,15 +53,17 @@ struct MyApp {
     model: model::Model,
     home_controller: HomeController,
     select_images_controller: SelectImagesController,
+    register_controller: RegisterController,
 }
 
 impl Default for MyApp {
     fn default() -> Self {
         Self {
             selected_tab: Tab::Home,
-            model: Model::new(),
+            model: Model::new("/Users/albert/projects/microcount-rs/src".to_string()),
             home_controller: HomeController::new(),
             select_images_controller: SelectImagesController::new(),
+            register_controller: RegisterController::new(),
         }
     }
 }
@@ -94,7 +96,9 @@ impl eframe::App for MyApp {
                 Tab::SelectImages => {
                     ui_tab_select_images(&mut self.model, &mut self.select_images_controller, ui)
                 }
-                Tab::Register => {}
+                Tab::Register => {
+                    ui_tab_register(&mut self.model, &mut self.register_controller, ui);
+                }
                 Tab::SelectRegions => {}
                 Tab::Analyse => {}
             }

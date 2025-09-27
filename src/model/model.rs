@@ -1,19 +1,22 @@
-use geo::convert;
 use rfd::FileDialog;
 use std::io::Error;
 use std::path::Path;
 use std::{collections::HashSet, fs};
 
-use crate::model::{constants, ConvertStatus, ImageMetadata, Workspace};
+use crate::model::{constants, Atlas, ConvertStatus, ImageMetadata, Workspace};
 
 #[derive(Debug)]
 pub struct Model {
     pub workspace: Option<Workspace>,
+    pub atlas: Atlas,
 }
 
 impl Model {
-    pub fn new() -> Model {
-        Model { workspace: None }
+    pub fn new(app_dir: String) -> Model {
+        Model {
+            workspace: None,
+            atlas: Atlas::new(app_dir).unwrap(),
+        }
     }
 
     pub fn create_workspace(&self) -> Result<(), Error> {
@@ -72,19 +75,22 @@ impl Model {
             Some(files) => {
                 self.workspace.as_mut().map(|ws| {
                     files.iter().for_each(|file| {
-                        let img = ImageMetadata::new(file.to_str().unwrap(), &ws.dir_name);
-                        ws.images.push(img);
+                        let mut img = ImageMetadata::new(file.to_str().unwrap(), &ws.dir_name);
+                        img.set_metadata();
+                        ws.images.insert(img.src_fn().to_string(), img);
                     });
                 });
+
+                self.save_workspace();
             }
             None => (),
         };
         Ok(())
     }
 
-    pub fn convert_and_downsample(&mut self, idx: &HashSet<usize>) {
+    pub fn convert_and_downsample(&mut self, idx: &HashSet<String>) {
         self.workspace.as_mut().map(|ws| {
-            idx.iter().map(|&i| {
+            idx.iter().map(|i| {
                 ws.get_image(i).map(|img| {
                     Self::convert(img);
                     Self::downsample(img);
@@ -100,4 +106,22 @@ impl Model {
     }
 
     fn downsample(img: &mut ImageMetadata) {}
+
+    pub fn get_all_image_ids(&self) -> Vec<&ImageMetadata> {
+        self.workspace
+            .as_ref()
+            .map_or(vec![], |ws| ws.images.values().collect())
+    }
+
+    pub fn get_image(&mut self, id: &str) -> Option<&mut ImageMetadata> {
+        self.workspace.as_mut().and_then(|ws| ws.get_image(id))
+    }
+
+    fn save_workspace(&self) {
+        self.workspace.as_ref().and_then(|ws| {
+            let folder = Path::new(ws.dir_name.as_str());
+            let ws_s = serde_json::to_string(&ws).unwrap();
+            fs::write(folder.join("ws.json"), ws_s).ok()
+        });
+    }
 }

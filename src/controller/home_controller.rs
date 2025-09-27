@@ -17,11 +17,11 @@ impl HomeController {
         self.age += 1;
     }
 
-    pub fn load_workspace(&mut self, model: &mut Model) {
-        model.load_workspace();
+    pub fn load_workspace(&mut self, model: &mut Model) -> Result<(), std::io::Error> {
+        model.load_workspace()
     }
 
-    pub fn create_workspace(&mut self, model: &mut Model) {
-        model.create_workspace();
+    pub fn create_workspace(&mut self, model: &mut Model) -> Result<(), std::io::Error> {
+        model.create_workspace()
     }
 }

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::model::ImageMetadata;
@@ -5,13 +7,13 @@ use crate::model::ImageMetadata;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Workspace {
     pub dir_name: String,
-    pub images: Vec<ImageMetadata>,
+    pub images: HashMap<String, ImageMetadata>,
 }
 
 impl Workspace {
     pub fn new(dir_name: String) -> Workspace {
         Workspace {
-            images: vec![],
+            images: HashMap::new(),
             dir_name,
         }
     }
@@ -20,7 +22,13 @@ impl Workspace {
         self.images.len()
     }
 
-    pub fn get_image(&mut self, idx: usize) -> Option<&mut ImageMetadata> {
-        self.images.get_mut(idx)
+    // pub fn get_image(&mut self, idx: usize) -> Option<&mut ImageMetadata> {
+    //     let keys = self.images.values();
+    //     self.images.get_mut(k)
+    //     self.images.get_mut(idx)
+    // }
+
+    pub fn get_image(&mut self, id: &str) -> Option<&mut ImageMetadata> {
+        self.images.get_mut(id)
     }
 }

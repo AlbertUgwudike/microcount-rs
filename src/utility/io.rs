@@ -1,15 +1,15 @@
-use core::slice;
-use std::{num, ops::Range};
-
-use crate::utility::types::{Matrix, TiffInfo, TiffType, Volume, ROI};
+use crate::utility::{
+    imops::{array2buff, array2rgb_buff, stack_rgb, volume_to_matrix_vec},
+    types::{Matrix, TiffInfo, TiffType, ROI},
+};
 
 use eframe::egui;
-use image::{open, ImageBuffer, Luma, Primitive, Rgb};
+use image::open;
 use itertools::Itertools;
 use ndarray::prelude::*;
 use tiff::{
-    decoder::{ifd, Decoder, DecodingResult},
-    TiffError, TiffResult,
+    decoder::{Decoder, DecodingResult},
+    TiffError,
 };
 
 pub fn read_as_channels(file_name: &str) -> Vec<Matrix<f64>> {
@@ -29,65 +29,12 @@ pub fn read_as_channels(file_name: &str) -> Vec<Matrix<f64>> {
         .collect()
 }
 
-pub fn volume_to_matrix_vec<T: Clone>(
-    vol: &Volume<T>,
-    order: (usize, usize, usize),
-) -> Vec<Matrix<T>> {
-    // let (h, w, _) = vol.dim();
-    vol.clone()
-        .permuted_axes(order)
-        .outer_iter()
-        .map(|a| a.into_owned()) //.into_shape_clone((h, w)).expect("yum")
-        .collect()
-}
-
-pub fn array2buff<T: Copy + Primitive>(arr: Matrix<T>) -> ImageBuffer<Luma<T>, Vec<T>> {
-    let (h, w) = arr.dim();
-    let (fast, _) = arr.into_raw_vec_and_offset();
-    let mut buff = image::ImageBuffer::new(w as u32, h as u32);
-    buff.copy_from_slice(&fast);
-    buff
-}
-
-pub fn array2rgb_buff(arr1: Volume<u8>) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
-    let arr = arr1.permuted_axes((2, 1, 0));
-    let (w, h, _) = arr.dim();
-
-    let buff = ImageBuffer::new(w as u32, h as u32);
-
-    arr.rows()
-        .into_iter()
-        .enumerate()
-        .fold(buff, |mut acc, (i, p)| {
-            let px = Rgb([p[0], p[1], p[2]]);
-            let (r, c) = ((i / h) as u32, (i % h) as u32);
-            acc.put_pixel(r, c, px);
-            acc
-        })
-}
-
-pub fn stack_rgb<T: Clone>(red: &Matrix<T>, green: &Matrix<T>, blue: &Matrix<T>) -> Volume<T> {
-    let mut red_ch = red.clone().insert_axis(Axis(0));
-    let green_ch = green.clone().insert_axis(Axis(0));
-    let blue_ch = blue.clone().insert_axis(Axis(0));
-
-    red_ch
-        .append(Axis(0), (&green_ch).into())
-        .expect("Failure to expand");
-
-    red_ch
-        .append(Axis(0), (&blue_ch).into())
-        .expect("Failure to expand");
-
-    red_ch
-}
-
 pub fn read_tiff_region(
     file_name: &str,
     bbox: ROI,
     df: usize,
 ) -> Result<Vec<Matrix<u16>>, TiffError> {
-    let h = std::fs::File::open(file_name).unwrap();
+    let h = std::fs::File::open(file_name)?;
     let mut tr = Decoder::new(h).unwrap();
     tiff_type(&mut tr).and_then(|tp| read_as_multi_panel(&mut tr, &tp, bbox, df))
 }
@@ -159,7 +106,7 @@ fn get_pixels(
             .collect::<Vec<Vec<u16>>>()
             .concat())
     } else {
-        Ok((start_idx..end_idx + 1)
+        Ok((start_idx..end_idx)
             .flat_map(|idx| {
                 let ck = read_chunk(tr, idx).unwrap();
                 let row_idx = (idx * ch) as usize;
@@ -234,7 +181,7 @@ fn read_chunk(tr: &mut Decoder<std::fs::File>, idx: u32) -> Result<Vec<u16>, Tif
         DecodingResult::U8(v) => v.iter().map(|&a| a as u16).collect::<Vec<u16>>(),
         DecodingResult::U32(v) => v.iter().map(|&a| a as u16).collect(),
         DecodingResult::U64(v) => v.iter().map(|&a| a as u16).collect(),
-        DecodingResult::F16(v) => vec![2, 3, 4],
+        DecodingResult::F16(v) => v.iter().map(|&a| a.to_f32() as u16).collect(),
         DecodingResult::F32(v) => v.iter().map(|&a| a as u16).collect(),
         DecodingResult::F64(v) => v.iter().map(|&a| a as u16).collect(),
         DecodingResult::I8(v) => v.iter().map(|&a| a as u16).collect(),

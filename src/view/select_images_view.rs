@@ -1,5 +1,4 @@
 use std::ops::Div;
-use std::path::Path;
 
 use eframe::egui::{self, Color32, Pos2, Rect, Scene, Sense, Stroke, TextureHandle, Ui, Vec2};
 
@@ -24,77 +23,101 @@ pub fn ui_tab_select_images(
         }
     });
 
-    table_ui(model, con, ui);
+    ui.vertical(|ui| {
+        table_ui(model, con, ui);
 
-    ui.separator();
+        ui.separator();
 
-    egui::Frame::new().show(ui, |ui| {
         image_viewer(model, con, ui);
     });
 }
 
-fn image_viewer(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::Ui) {
-    let w = ui.available_width();
-    egui::containers::Area::new("my. gird".into())
-        .fixed_pos(ui.min_rect().min)
-        .default_width(w.div(2.0))
-        .show(ui.ctx(), |ui| {
-            let scene = Scene::new().zoom_range(0.0..=f32::INFINITY);
+fn black_box(ui: &mut Ui, name: &str, add_contents: impl FnOnce(&mut Ui) -> ()) {
+    egui::containers::Window::new(name.to_string())
+        .current_pos(ui.max_rect().min)
+        .max_size(ui.available_size())
+        .min_size(ui.available_size())
+        .interactable(false)
+        .title_bar(false)
+        .frame(
+            egui::Frame::new()
+                .corner_radius(0)
+                .fill(Color32::BLACK)
+                .outer_margin(0),
+        )
+        .show(ui.ctx(), add_contents);
+}
 
+fn image_viewer(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::Ui) {
+    ui.columns(2, |ui| {
+        black_box(&mut ui[0], "left", |ui| {
             let mut inner_rect = Rect::NAN;
-            let img = con.selected_img.and_then(|idx| con.get_image(model, idx));
+            let img = con
+                .selected_img
+                .as_ref()
+                .and_then(|idx| con.get_image(model, idx.as_str()));
 
             let f = |ui: &mut Ui| {
                 if let Some(im) = &con.image_data {
                     let src_fn_opt = img.map(|im_md| im_md.src_fn());
                     if let Some(src_fn) = src_fn_opt {
                         ui.image(im);
-                        bounding_box(con, ui, src_fn);
+
+                        let pos = &mut con.pos_offset;
+                        let sz = &mut con.sz_offset;
+                        let data = &mut con.image_data2;
+
+                        bounding_box(ui, src_fn, pos, sz, data);
                     }
                 }
                 inner_rect = ui.min_rect();
             };
 
-            let mut sr = Rect::ZERO;
-            let response = scene.show(ui, &mut sr, f).response;
-
-            con.scene_rect = sr;
+            let response = Scene::new()
+                .zoom_range(0.0..=f32::INFINITY)
+                .show(ui, &mut con.scene_rect, f)
+                .response;
 
             if response.double_clicked() {
                 con.scene_rect = inner_rect;
             }
         });
 
-    egui::containers::Area::new("my. gird2".into())
-        .fixed_pos(Pos2::new(w.div(2.0), ui.min_rect().min.y))
-        .default_width(w.div(2.0))
-        .show(ui.ctx(), |ui| {
-            let scene2 = Scene::new().zoom_range(0.0..=f32::INFINITY);
+        black_box(&mut ui[1], "right", |ui| {
+            let mut inner_rect = Rect::NAN;
 
-            let mut inner_rect2 = Rect::NAN;
+            let f = |ui: &mut Ui| {
+                if let Some(im) = &con.image_data2 {
+                    ui.image(im);
+                }
 
-            let response2 = scene2
-                .show(ui, &mut con.scene_rect2, |ui| {
-                    if let Some(im) = &con.image_data2 {
-                        ui.image(im);
-                    }
+                inner_rect = ui.min_rect();
+            };
 
-                    inner_rect2 = ui.min_rect();
-                })
+            let response = Scene::new()
+                .zoom_range(0.0..=f32::INFINITY)
+                .show(ui, &mut con.scene_rect2, f)
                 .response;
 
-            if response2.double_clicked() {
-                con.scene_rect2 = inner_rect2;
+            if response.double_clicked() {
+                con.scene_rect2 = inner_rect;
             }
         });
+    });
 }
 
-fn bounding_box(con: &mut SelectImagesController, ui: &mut egui::Ui, src_fn: &str) {
+fn bounding_box(
+    ui: &mut egui::Ui,
+    src_fn: &str,
+    pos_offset: &mut Vec2,
+    sz_offset: &mut Vec2,
+    data: &mut Option<TextureHandle>,
+) {
     let r = ui.min_rect();
     let painter = ui.painter_at(r);
     let response = ui.interact(painter.clip_rect(), ui.id(), Sense::all());
-    let bbox_min = r.min + con.pos_offset;
-    let bbox_max = r.min + con.sz_offset + con.pos_offset;
+    let bbox_min = r.min + *pos_offset;
+    let bbox_max = r.min + *sz_offset + *pos_offset;
 
     let bbox_rect = Rect::from_min_max(bbox_min, bbox_max);
     painter.rect(
@@ -109,22 +132,22 @@ fn bounding_box(con: &mut SelectImagesController, ui: &mut egui::Ui, src_fn: &st
     painter.circle(bbox_max, 20.0, Color32::GREEN, Stroke::NONE);
 
     let h_res = ui.interact(circ_rect, response.id.with(0), Sense::drag());
-    let r_res = ui.interact(bbox_rect, response.id.with(1), Sense::drag());
+    let _ = ui.interact(bbox_rect, response.id.with(1), Sense::drag());
     let r_res = ui.interact(bbox_rect, response.id.with(1), Sense::click());
 
-    con.pos_offset += r_res.drag_delta();
-    con.sz_offset += h_res.drag_delta();
+    *pos_offset += r_res.drag_delta();
+    *sz_offset += h_res.drag_delta();
 
-    con.pos_offset.x = r
+    pos_offset.x = r
         .x_range()
-        .clamp(r.x_range().clamp(con.pos_offset.x + con.sz_offset.x) - con.sz_offset.x);
-    con.pos_offset.y = r
+        .clamp(r.x_range().clamp(pos_offset.x + sz_offset.x) - sz_offset.x);
+    pos_offset.y = r
         .y_range()
-        .clamp(r.y_range().clamp(con.pos_offset.y + con.sz_offset.y) - con.sz_offset.y);
+        .clamp(r.y_range().clamp(pos_offset.y + sz_offset.y) - sz_offset.y);
 
     if r_res.double_clicked() {
-        let scaled_offset = con.pos_offset * 25.0;
-        let scaled_sz_offset = con.sz_offset * 25.0;
+        let scaled_offset = *pos_offset * 25.0;
+        let scaled_sz_offset = *sz_offset * 25.0;
         let dn_bbox = (
             scaled_offset.y as usize,
             scaled_offset.x as usize,
@@ -136,7 +159,7 @@ fn bounding_box(con: &mut SelectImagesController, ui: &mut egui::Ui, src_fn: &st
             let h = ui
                 .ctx()
                 .load_texture("screenshot_demo2", im, Default::default());
-            con.image_data2 = Some(h);
+            *data = Some(h);
         });
     }
 }
@@ -152,12 +175,11 @@ fn table_ui(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::
         .column(Column::remainder())
         .column(Column::remainder())
         .column(Column::remainder())
-        .min_scrolled_height(0.0)
+        .auto_shrink(false)
+        .min_scrolled_height(available_height.div(5.0))
         .max_scroll_height(available_height.div(5.0));
 
     table = table.sense(egui::Sense::click());
-
-    let row_count = con.n_images(model);
 
     table
         .header(20.0, |mut header| {
@@ -186,28 +208,49 @@ fn table_ui(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::
             });
         })
         .body(|body| {
-            body.rows(18.0, row_count, |mut row| {
-                let img = con.get_image(model, row.index());
-                row.set_selected(con.selection.contains(&row.index()));
+            let img_ids = model.get_all_image_ids();
+            body.rows(18.0, img_ids.len(), |mut row| {
+                let idx = row.index();
+                let img = img_ids[idx];
+
+                row.set_selected(con.selection.contains(img.src_fn()));
                 row.set_overline(true);
+
                 row.col(|ui| {
-                    ui.label(img.as_ref().map_or("", |i| i.src_fn()));
+                    ui.label(img.src_fn());
                 });
                 row.col(|ui| {
-                    ui.label(img.as_ref().map_or("", |_| "0"));
+                    ui.label(img.registration_channel.to_string());
                 });
                 row.col(|ui| {
-                    ui.label(img.as_ref().map_or("", |_| "0"));
+                    ui.label(img.cell_channel.to_string());
                 });
                 row.col(|ui| {
-                    ui.label(img.as_ref().map_or("", |_| "0"));
+                    ui.label(img.comarker_channel.to_string());
                 });
                 row.col(|ui| {
-                    ui.label(img.as_ref().map_or("", |i| i.conversion_status.to_str()));
+                    ui.label(img.conversion_status.to_str());
                 });
 
+                let mut modifier = false;
+                let mut clicked = false;
+
                 if row.response().clicked() {
-                    con.on_image_selected(row.index(), model, &row.response().ctx);
+                    clicked = true
+                }
+
+                row.response().ctx.input(|i| {
+                    if i.key_down(egui::Key::Space) {
+                        modifier = true;
+                    }
+                });
+
+                if modifier && clicked {
+                    con.toggle_selection(img, &row.response().ctx);
+                } else if clicked {
+                    con.unselect_all();
+                    con.toggle_selection(img, &row.response().ctx);
+                    con.on_image_selected(img, &row.response().ctx);
                 }
             });
         });
