@@ -1,6 +1,7 @@
 use crate::utility::types::{Matrix, Volume};
 use eframe::egui::{self, ColorImage};
 use image::{ImageBuffer, Luma, Primitive, Rgb};
+use imageproc::definitions::Image;
 use ndarray::{concatenate, prelude::*, Slice};
 
 pub fn volume_to_matrix_vec<T: Clone>(
@@ -24,7 +25,15 @@ pub fn matrix_vec_to_volume<T: Clone>(matrixs: &Vec<Matrix<T>>) -> Option<Volume
 
 pub fn array2buff<T: Copy + Primitive>(arr: Matrix<T>) -> ImageBuffer<Luma<T>, Vec<T>> {
     let (h, w) = arr.dim();
-    let (fast, _) = arr.into_raw_vec_and_offset();
+    let fast = arr.iter().map(|a| a.to_owned()).collect();
+    vec2buff(fast, h, w)
+}
+
+pub fn vec2buff<T: Copy + Primitive>(
+    fast: Vec<T>,
+    h: usize,
+    w: usize,
+) -> ImageBuffer<Luma<T>, Vec<T>> {
     let mut buff = image::ImageBuffer::new(w as u32, h as u32);
     buff.copy_from_slice(&fast);
     buff
@@ -65,7 +74,7 @@ pub fn stack_rgb<T: Clone>(red: &Matrix<T>, green: &Matrix<T>, blue: &Matrix<T>)
 
 pub fn get_slice<T: Clone>(vol: &Volume<T>, idx: isize, axis: usize) -> Matrix<T> {
     vol.slice_axis(Axis(axis), Slice::new(idx, Some(idx + 1), 1))
-        .remove_axis(Axis(2))
+        .remove_axis(Axis(axis))
         .to_owned()
 }
 

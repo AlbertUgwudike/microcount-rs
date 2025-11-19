@@ -1,6 +1,8 @@
 use std::ops::Div;
 
-use eframe::egui::{self, Color32, Pos2, Rect, Scene, Sense, Stroke, TextureHandle, Ui, Vec2};
+use eframe::egui::{
+    self, Color32, Pos2, Rect, Response, Scene, Sense, Shape, Stroke, TextureHandle, Ui, Vec2,
+};
 
 use crate::controller::RegisterController;
 use crate::model::Model;
@@ -10,6 +12,12 @@ use crate::utility::io::egui_image_from_path;
 pub fn ui_tab_register(model: &mut Model, con: &mut RegisterController, ui: &mut egui::Ui) {
     ui.vertical(|ui| {
         table_ui(model, con, ui);
+
+        ui.separator();
+
+        if ui.button("Register").clicked() {
+            con.register_button_pushed(model);
+        }
 
         ui.separator();
 
@@ -37,6 +45,13 @@ fn image_viewer(model: &mut Model, con: &mut RegisterController, ui: &mut egui::
     ui.columns(2, |ui| {
         black_box(&mut ui[0], "left", |ui| {
             ui.vertical(|ui| {
+                let toggle_ori_button = ui.button("Orientation");
+
+                if toggle_ori_button.clicked() {
+                    con.toggle_atlas_orientation();
+                    con.on_atlas_interact(model, &toggle_ori_button.ctx);
+                }
+
                 let mut inner_rect = Rect::NAN;
 
                 let f = |ui: &mut Ui| {
@@ -45,6 +60,15 @@ fn image_viewer(model: &mut Model, con: &mut RegisterController, ui: &mut egui::
                     }
 
                     inner_rect = ui.min_rect();
+
+                    let r = ui.min_rect();
+                    let painter = ui.painter_at(r);
+
+                    for i in 0..6 {
+                        let start = Pos2::from(con.hex_pos[i]);
+                        let end = Pos2::from(con.hex_pos[(i + 1) % 6]);
+                        painter.line_segment([start, end], Stroke::new(0.5, Color32::BLUE));
+                    }
                 };
 
                 let response = Scene::new()
@@ -56,17 +80,13 @@ fn image_viewer(model: &mut Model, con: &mut RegisterController, ui: &mut egui::
                     con.scene_rect2 = inner_rect;
                 }
 
-                let slider = egui::Slider::new(&mut con.slider_pos, 0..=50);
-                let res = ui.add(slider).interact(Sense::click_and_drag());
+                let n_slices = model.atlas.n_slices(con.atlas_orientation);
 
-                if res.dragged() {
-                    let mat = model.atlas.get_reference_img(
-                        crate::model::atlas::Orientation::Axial,
-                        con.slider_pos as isize,
-                    );
-                    let image = egui_image_from_mat(mat);
-                    let h = res.ctx.load_texture("atlas", image, Default::default());
-                    con.image_data2 = Some(h);
+                let slider = egui::Slider::new(&mut con.slider_pos, 0..=(n_slices - 1));
+                let slider = ui.add(slider).interact(Sense::click_and_drag());
+
+                if slider.dragged() {
+                    con.on_atlas_interact(model, &slider.ctx);
                 }
             });
         });
@@ -79,6 +99,38 @@ fn image_viewer(model: &mut Model, con: &mut RegisterController, ui: &mut egui::
                     ui.image(im);
                 }
                 inner_rect = ui.min_rect();
+
+                let r = ui.min_rect();
+                let painter = ui.painter_at(r);
+                let response = ui.interact(painter.clip_rect(), ui.id(), Sense::all());
+
+                let vertices = con.hex_pos.map(Pos2::from).to_vec();
+                let hex = Shape::convex_polygon(
+                    vertices,
+                    Color32::TRANSPARENT,
+                    Stroke::new(4.0, Color32::BLUE),
+                );
+
+                let res_1 = ui.interact(
+                    hex.visual_bounding_rect(),
+                    response.id.with(6),
+                    Sense::drag(),
+                );
+
+                painter.add(hex);
+
+                for i in 0..6 {
+                    let mut start = Pos2::from(con.hex_pos[i]);
+                    // let end = Pos2::from(con.hex_pos[(i + 1) % 6]);
+                    // painter.line_segment([start, end], Stroke::new(2.0, Color32::RED));
+
+                    let circ_rect = Rect::from_center_size(start, Vec2::new(10.0, 10.0));
+                    painter.circle(start, 5.0, Color32::GREEN, Stroke::NONE);
+
+                    let res = ui.interact(circ_rect, response.id.with(i), Sense::drag());
+                    start += res.drag_delta() + res_1.drag_delta();
+                    con.hex_pos[i] = (start.x, start.y);
+                }
             };
 
             let response = Scene::new()

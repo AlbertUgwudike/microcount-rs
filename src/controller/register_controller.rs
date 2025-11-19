@@ -1,10 +1,16 @@
 use std::path::Path;
 
+use csv::Error;
 use eframe::egui::{Context, Rect, TextureHandle, Vec2};
 
 use crate::{
-    model::{ImageMetadata, Model, Workspace},
-    utility::{io::egui_image_from_path, types::ROI},
+    algorithm::proc::iter_align,
+    model::{self, atlas::Orientation, ImageMetadata, Model, Workspace},
+    utility::{
+        imops::{array2buff, egui_image_from_mat},
+        io::{egui_image_from_path, read_tiff_region},
+        types::ROI,
+    },
 };
 
 pub struct RegisterController {
@@ -15,6 +21,8 @@ pub struct RegisterController {
     pub image_data2: Option<TextureHandle>,
     pub selected_img: Option<String>,
     pub slider_pos: usize,
+    pub atlas_orientation: Orientation,
+    pub hex_pos: [(f32, f32); 6],
 }
 
 impl RegisterController {
@@ -27,6 +35,15 @@ impl RegisterController {
             image_data2: None,
             selected_img: None,
             slider_pos: 25,
+            atlas_orientation: Orientation::Axial,
+            hex_pos: [
+                (30.0, 10.0),
+                (70.0, 10.0),
+                (95.0, 50.0),
+                (70.0, 90.0),
+                (30.0, 90.0),
+                (5.0, 50.0),
+            ],
         }
     }
 
@@ -60,5 +77,44 @@ impl RegisterController {
 
     pub fn unselect_all(&mut self) {
         self.selection.clear();
+    }
+
+    pub fn toggle_atlas_orientation(&mut self) {
+        self.atlas_orientation = match self.atlas_orientation {
+            Orientation::Axial => Orientation::Coronal,
+            Orientation::Coronal => Orientation::Sagittal,
+            Orientation::Sagittal => Orientation::Axial,
+        }
+    }
+
+    pub fn on_atlas_interact(&mut self, model: &mut Model, ctx: &Context) {
+        let mat = model
+            .atlas
+            .get_reference_img(self.atlas_orientation, self.slider_pos as isize);
+        let image = egui_image_from_mat(mat);
+        let h = ctx.load_texture("atlas", image, Default::default());
+        self.image_data2 = Some(h);
+    }
+
+    pub fn register_button_pushed(&mut self, model: &mut Model) {
+        let moving = model
+            .atlas
+            .get_reference_img(self.atlas_orientation, self.slider_pos as isize)
+            .map(|&a| a as f32);
+
+        self.selected_img.as_ref().map(|id| {
+            model.get_image(&id).map(|img_md| {
+                let bbox = (0, 0, img_md.size.1 - 1, img_md.size.0 - 1);
+                let res = read_tiff_region(img_md.src_fn(), bbox, 25);
+                match res {
+                    Ok(ims) => {
+                        let fixed = array2buff(ims[0].map(|&a| a as f32));
+                        let moving = array2buff(moving.t().to_owned());
+                        iter_align(&moving, &fixed);
+                    }
+                    Err(_) => {}
+                }
+            });
+        });
     }
 }

@@ -53,9 +53,18 @@ impl Atlas {
 
     pub fn get_reference_img(&self, ori: Orientation, idx: isize) -> Matrix<u16> {
         match ori {
-            Orientation::Axial => get_slice(&self.reference, idx, 2),
-            Orientation::Sagittal => get_slice(&self.reference, idx, 1),
-            Orientation::Coronal => get_slice(&self.reference, idx, 0),
+            Orientation::Axial => get_slice(&self.reference, idx, 0),
+            Orientation::Sagittal => get_slice(&self.reference, idx, 2),
+            Orientation::Coronal => get_slice(&self.reference, idx, 1),
+        }
+    }
+
+    pub fn n_slices(&self, ori: Orientation) -> usize {
+        let (a, c, s) = self.reference.dim();
+        match ori {
+            Orientation::Axial => a,
+            Orientation::Sagittal => s,
+            Orientation::Coronal => c,
         }
     }
 
@@ -105,6 +114,7 @@ struct StructureRow {
     parent_structure_id: f64,
 }
 
+#[derive(Copy, Clone)]
 pub enum Orientation {
     Axial,
     Sagittal,

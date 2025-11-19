@@ -1,6 +1,6 @@
 use std::ops::Div;
 
-use eframe::egui::{self, Color32, Pos2, Rect, Scene, Sense, Stroke, TextureHandle, Ui, Vec2};
+use eframe::egui::{self, Color32, Rect, Scene, Sense, Stroke, TextureHandle, Ui, Vec2};
 
 use crate::controller::SelectImagesController;
 use crate::model::Model;

@@ -1,5 +1,5 @@
 mod binary;
 mod helpers;
 pub mod microcount;
-mod proc;
+pub mod proc;
 mod regions;
