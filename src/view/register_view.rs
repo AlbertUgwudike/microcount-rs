@@ -60,21 +60,14 @@ fn image_viewer(model: &mut Model, con: &mut RegisterController, ui: &mut egui::
                     }
 
                     inner_rect = ui.min_rect();
-
-                    let r = ui.min_rect();
-                    let painter = ui.painter_at(r);
-
-                    for i in 0..6 {
-                        let start = Pos2::from(con.hex_pos[i]);
-                        let end = Pos2::from(con.hex_pos[(i + 1) % 6]);
-                        painter.line_segment([start, end], Stroke::new(0.5, Color32::BLUE));
-                    }
+                    draw_hex(&mut con.atlas_hex, con.transform.scaling, ui);
                 };
 
-                let response = Scene::new()
-                    .zoom_range(0.0..=f32::INFINITY)
-                    .show(ui, &mut con.scene_rect2, f)
-                    .response;
+                let scene = Scene::new().zoom_range(0.0..=f32::INFINITY);
+
+                let mut response = scene.show(ui, &mut con.scene_rect2, f).response;
+
+                scene.register_pan_and_zoom(ui, &mut response, &mut con.transform);
 
                 if response.double_clicked() {
                     con.scene_rect2 = inner_rect;
@@ -97,52 +90,55 @@ fn image_viewer(model: &mut Model, con: &mut RegisterController, ui: &mut egui::
             let f = |ui: &mut Ui| {
                 if let Some(im) = &con.image_data {
                     ui.image(im);
+                    let dim = (*im.size().iter().max().unwrap() as f32) / 250.0;
+                    draw_hex(&mut con.hist_hex, con.transform2.scaling / dim, ui);
                 }
                 inner_rect = ui.min_rect();
-
-                let r = ui.min_rect();
-                let painter = ui.painter_at(r);
-                let response = ui.interact(painter.clip_rect(), ui.id(), Sense::all());
-
-                let vertices = con.hex_pos.map(Pos2::from).to_vec();
-                let hex = Shape::convex_polygon(
-                    vertices,
-                    Color32::TRANSPARENT,
-                    Stroke::new(4.0, Color32::BLUE),
-                );
-
-                let res_1 = ui.interact(
-                    hex.visual_bounding_rect(),
-                    response.id.with(6),
-                    Sense::drag(),
-                );
-
-                painter.add(hex);
-
-                for i in 0..6 {
-                    let mut start = Pos2::from(con.hex_pos[i]);
-                    // let end = Pos2::from(con.hex_pos[(i + 1) % 6]);
-                    // painter.line_segment([start, end], Stroke::new(2.0, Color32::RED));
-
-                    let circ_rect = Rect::from_center_size(start, Vec2::new(10.0, 10.0));
-                    painter.circle(start, 5.0, Color32::GREEN, Stroke::NONE);
-
-                    let res = ui.interact(circ_rect, response.id.with(i), Sense::drag());
-                    start += res.drag_delta() + res_1.drag_delta();
-                    con.hex_pos[i] = (start.x, start.y);
-                }
             };
 
-            let response = Scene::new()
-                .zoom_range(0.0..=f32::INFINITY)
-                .show(ui, &mut con.scene_rect, f)
-                .response;
+            let scene = Scene::new().zoom_range(0.0..=f32::INFINITY);
+
+            let mut response = scene.show(ui, &mut con.scene_rect, f).response;
+
+            scene.register_pan_and_zoom(ui, &mut response, &mut con.transform2);
 
             if response.double_clicked() {
                 con.scene_rect = inner_rect;
             }
         });
     });
+}
+
+fn draw_hex(pos: &mut [(f32, f32); 6], scale: f32, ui: &mut egui::Ui) {
+    let r = ui.min_rect();
+    let painter = ui.painter_at(r);
+    let response = ui.interact(painter.clip_rect(), ui.id(), Sense::all());
+
+    let vertices = pos.map(Pos2::from).to_vec();
+    let hex = Shape::convex_polygon(
+        vertices,
+        Color32::TRANSPARENT,
+        Stroke::new(4.0 / scale, Color32::BLUE),
+    );
+
+    let res_1 = ui.interact(
+        hex.visual_bounding_rect(),
+        response.id.with(6),
+        Sense::drag(),
+    );
+
+    painter.add(hex);
+
+    for i in 0..6 {
+        let mut start = Pos2::from(pos[i]);
+
+        let circ_rect = Rect::from_center_size(start, Vec2::new(10.0, 10.0) / scale);
+        painter.circle(start, 5.0 / scale, Color32::GREEN, Stroke::NONE);
+
+        let res = ui.interact(circ_rect, response.id.with(i), Sense::drag());
+        start += res.drag_delta() + res_1.drag_delta();
+        pos[i] = (start.x, start.y);
+    }
 }
 
 fn table_ui(model: &mut Model, con: &mut RegisterController, ui: &mut egui::Ui) {

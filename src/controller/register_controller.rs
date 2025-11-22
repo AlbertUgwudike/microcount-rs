@@ -1,7 +1,10 @@
 use std::path::Path;
 
 use csv::Error;
-use eframe::egui::{Context, Rect, TextureHandle, Vec2};
+use eframe::{
+    egui::{Context, Rect, TextureHandle, Vec2},
+    emath::TSTransform,
+};
 
 use crate::{
     algorithm::proc::iter_align,
@@ -22,7 +25,10 @@ pub struct RegisterController {
     pub selected_img: Option<String>,
     pub slider_pos: usize,
     pub atlas_orientation: Orientation,
-    pub hex_pos: [(f32, f32); 6],
+    pub atlas_hex: [(f32, f32); 6],
+    pub hist_hex: [(f32, f32); 6],
+    pub transform: TSTransform,
+    pub transform2: TSTransform,
 }
 
 impl RegisterController {
@@ -36,7 +42,7 @@ impl RegisterController {
             selected_img: None,
             slider_pos: 25,
             atlas_orientation: Orientation::Axial,
-            hex_pos: [
+            atlas_hex: [
                 (30.0, 10.0),
                 (70.0, 10.0),
                 (95.0, 50.0),
@@ -44,6 +50,22 @@ impl RegisterController {
                 (30.0, 90.0),
                 (5.0, 50.0),
             ],
+            hist_hex: [
+                (30.0, 10.0),
+                (70.0, 10.0),
+                (95.0, 50.0),
+                (70.0, 90.0),
+                (30.0, 90.0),
+                (5.0, 50.0),
+            ],
+            transform: TSTransform {
+                scaling: 1.0,
+                translation: Vec2::ZERO,
+            },
+            transform2: TSTransform {
+                scaling: 1.0,
+                translation: Vec2::ZERO,
+            },
         }
     }
 
