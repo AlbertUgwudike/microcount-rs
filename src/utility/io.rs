@@ -147,8 +147,8 @@ fn tiff_type(tr: &mut Decoder<std::fs::File>) -> Result<TiffType, TiffError> {
     let spp = tr.get_tag(tiff::tags::Tag::SamplesPerPixel)?.into_u16()? as usize;
     let panel_count = image_count(tr)?;
 
-    println!("Panel Count: {:?}", panel_count);
-    println!("Samples: {:?}", spp);
+    // println!("Panel Count: {:?}", panel_count);
+    // println!("Samples: {:?}", spp);
 
     if panel_count == 1 {
         Ok(TiffType::SinglePanel { bps, cc: spp })

@@ -1,21 +1,32 @@
+use eframe::egui::Context;
 use rfd::FileDialog;
-use std::io::Error;
+use std::io::{self, Error};
 use std::path::Path;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::{collections::HashSet, fs};
 
+use crate::concurrency::ThreadPool;
 use crate::model::{constants, Atlas, ConvertStatus, ImageMetadata, Workspace};
+use crate::ThreadLabel;
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct Model {
-    pub workspace: Option<Workspace>,
+    pub workspace: Option<Arc<Mutex<Workspace>>>,
     pub atlas: Atlas,
+    pub counter: Arc<Mutex<i32>>,
+    pub threadpool: ThreadPool<ThreadLabel>,
+    pub frame: Arc<Mutex<Context>>,
 }
 
 impl Model {
-    pub fn new(app_dir: String) -> Model {
+    pub fn new(app_dir: String, frame: Context) -> Model {
         Model {
             workspace: None,
             atlas: Atlas::new(app_dir).unwrap(),
+            counter: Arc::new(Mutex::new(0)),
+            threadpool: ThreadPool::new(),
+            frame: Arc::new(Mutex::new(frame)),
         }
     }
 
@@ -64,39 +75,53 @@ impl Model {
             Err(err) => return Err(Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
         };
 
-        self.workspace = Some(ws);
+        self.workspace = Some(Arc::new(Mutex::new(ws)));
 
         Ok(())
     }
 
+    pub fn get_dir_name(&self) -> String {
+        if let Some(ws) = &self.workspace {
+            ws.try_lock()
+                .map(|w| w.dir_name.clone())
+                .unwrap_or("".into())
+        } else {
+            "".into()
+        }
+    }
+
     pub fn add_images(&mut self) -> Result<(), Error> {
         let file_option = FileDialog::new().set_directory("/").pick_files();
-        match file_option {
-            Some(files) => {
-                self.workspace.as_mut().map(|ws| {
+        if let Some(ws) = &self.workspace {
+            let mut ws = ws.try_lock().map_err(|_| Error::other("error"))?;
+
+            match file_option {
+                Some(files) => {
                     files.iter().for_each(|file| {
                         let mut img = ImageMetadata::new(file.to_str().unwrap(), &ws.dir_name);
                         img.set_metadata();
                         ws.images.insert(img.src_fn().to_string(), img);
                     });
-                });
 
-                self.save_workspace();
-            }
-            None => (),
-        };
+                    self.save_workspace();
+                }
+                None => (),
+            };
+        }
         Ok(())
     }
 
-    pub fn convert_and_downsample(&mut self, idx: &HashSet<String>) {
-        self.workspace.as_mut().map(|ws| {
-            idx.iter().map(|i| {
-                ws.get_image(i).map(|img| {
+    pub fn convert_and_downsample(&mut self, idx: &HashSet<String>) -> Result<(), Error> {
+        if let Some(ws) = &self.workspace {
+            let mut ws = ws.try_lock().map_err(|_| Error::other("error"))?;
+            idx.iter().for_each(|i| {
+                ws.images.get_mut(i).map(|img| {
                     Self::convert(img);
                     Self::downsample(img);
                 });
-            })
-        });
+            });
+        }
+        Ok(())
     }
 
     fn convert(img: &mut ImageMetadata) {
@@ -107,21 +132,67 @@ impl Model {
 
     fn downsample(img: &mut ImageMetadata) {}
 
-    pub fn get_all_image_ids(&self) -> Vec<&ImageMetadata> {
-        self.workspace
-            .as_ref()
-            .map_or(vec![], |ws| ws.images.values().collect())
+    pub fn get_all_images(&self) -> io::Result<Vec<ImageMetadata>> {
+        if let Some(ws) = &self.workspace {
+            let k = ws
+                .try_lock()
+                .map(|t| t.images.clone().into_values().collect());
+            k.map_err(|_| Error::other("could not acquire lock"))
+        } else {
+            Err(Error::other("No workspace loaded!"))
+        }
     }
 
-    pub fn get_image(&mut self, id: &str) -> Option<&mut ImageMetadata> {
-        self.workspace.as_mut().and_then(|ws| ws.get_image(id))
+    pub fn get_image(&self, id: &str) -> Option<ImageMetadata> {
+        if let Some(ws) = &self.workspace {
+            ws.try_lock()
+                .map(|t| t.images.get(id).cloned())
+                .ok()
+                .flatten()
+        } else {
+            None
+        }
     }
 
     fn save_workspace(&self) {
         self.workspace.as_ref().and_then(|ws| {
-            let folder = Path::new(ws.dir_name.as_str());
+            let dir_name = self.get_dir_name();
+            let folder = Path::new(&dir_name);
             let ws_s = serde_json::to_string(&ws).unwrap();
             fs::write(folder.join("ws.json"), ws_s).ok()
         });
+    }
+
+    pub fn dispatch<F>(&self, repaint: bool, f: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        if repaint {
+            self.threadpool.dispatch(self.wrap(f));
+        } else {
+            self.threadpool.dispatch(f);
+        }
+    }
+
+    pub fn dispatch_exclusive<F>(&mut self, label: ThreadLabel, repaint: bool, f: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        if repaint {
+            self.threadpool.dispatch_exclusive(label, self.wrap(f));
+        } else {
+            self.threadpool.dispatch_exclusive(label, f);
+        }
+    }
+
+    fn wrap<F>(&self, f: F) -> Box<dyn FnOnce() + Send + 'static>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let frame = Arc::clone(&self.frame);
+        Box::new(move || {
+            f();
+            frame.lock().unwrap().request_repaint();
+        })
     }
 }

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{model::DIR_CONVERT, utility::io};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ImageMetadata {
     source_fn: String,
     img_id: String,
@@ -17,6 +17,10 @@ pub struct ImageMetadata {
     pub registration_channel: usize,
     pub cell_channel: usize,
     pub comarker_channel: usize,
+
+    pub registration_buffer: String,
+    pub cell_buffer: String,
+    pub comarker_buffer: String,
 
     pub conversion_status: ConvertStatus,
 }
@@ -37,6 +41,9 @@ impl ImageMetadata {
             cell_channel: 0,
             comarker_channel: 0,
             registration_channel: 0,
+            cell_buffer: String::new(),
+            comarker_buffer: String::new(),
+            registration_buffer: String::new(),
             conversion_status: ConvertStatus::Unconverted,
         }
     }
@@ -70,6 +77,20 @@ impl ImageMetadata {
             self.img_ws_dir, DIR_CONVERT, self.img_id
         )
     }
+
+    pub fn refresh_channels(&mut self) {
+        str::parse::<usize>(&self.registration_buffer)
+            .map(|v| self.registration_channel = v)
+            .map_err(|_| self.registration_buffer = self.registration_channel.to_string());
+
+        str::parse::<usize>(&self.cell_buffer)
+            .map(|v| self.cell_channel = v)
+            .map_err(|_| self.cell_buffer = self.cell_channel.to_string());
+
+        str::parse::<usize>(&self.comarker_buffer)
+            .map(|v| self.comarker_channel = v)
+            .map_err(|_| self.comarker_buffer = self.comarker_channel.to_string());
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
@@ -84,7 +105,7 @@ impl ConvertStatus {
         match self {
             Self::Unconverted => "Unconverted",
             Self::Converting => "Converting",
-            Self::Converted => "Concerted",
+            Self::Converted => "Converted",
         }
     }
 }

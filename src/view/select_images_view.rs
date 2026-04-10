@@ -1,4 +1,7 @@
 use std::ops::Div;
+use std::sync::Arc;
+use std::thread::sleep;
+use std::time::Duration;
 
 use eframe::egui::{self, Color32, Rect, Scene, Sense, Stroke, TextureHandle, Ui, Vec2};
 
@@ -20,6 +23,18 @@ pub fn ui_tab_select_images(
         }
         if ui.button("Convert Selected").clicked() {
             model.convert_and_downsample(&con.selection);
+        }
+        if ui.button("Select All").clicked() {
+            let curr_count = Arc::clone(&model.counter);
+
+            model.dispatch(true, move || {
+                // simulate work
+                sleep(Duration::from_millis(1));
+                let _ = curr_count.lock().map(|mut v| {
+                    *v = *v + 1;
+                    println!("{}", "Gogol a yaho: ".to_string() + &v.to_string());
+                });
+            });
         }
     });
 
@@ -52,55 +67,48 @@ fn image_viewer(model: &mut Model, con: &mut SelectImagesController, ui: &mut eg
     ui.columns(2, |ui| {
         black_box(&mut ui[0], "left", |ui| {
             let mut inner_rect = Rect::NAN;
-            let img = con
+
+            let image_matrix = con.preview_image_data.as_ref();
+            let image_metadata = con
                 .selected_img
                 .as_ref()
                 .and_then(|idx| con.get_image(model, idx.as_str()));
 
-            let f = |ui: &mut Ui| {
-                if let Some(im) = &con.image_data {
-                    let src_fn_opt = img.map(|im_md| im_md.src_fn());
-                    if let Some(src_fn) = src_fn_opt {
-                        ui.image(im);
-
+            let scene = Scene::new().zoom_range(0.0..=f32::INFINITY).show(
+                ui,
+                &mut con.preview_image_rect,
+                |ui| {
+                    image_matrix.lock().as_ref().map(|im| ui.image(im));
+                    image_metadata.map(|img| {
                         let pos = &mut con.pos_offset;
                         let sz = &mut con.sz_offset;
-                        let data = &mut con.image_data2;
+                        let data = &mut con.image_data;
 
-                        bounding_box(ui, src_fn, pos, sz, data);
-                    }
-                }
-                inner_rect = ui.min_rect();
-            };
+                        bounding_box(ui, img.src_fn(), pos, sz, data);
+                    });
 
-            let response = Scene::new()
-                .zoom_range(0.0..=f32::INFINITY)
-                .show(ui, &mut con.scene_rect, f)
-                .response;
+                    inner_rect = ui.min_rect();
+                },
+            );
 
-            if response.double_clicked() {
-                con.scene_rect = inner_rect;
+            if scene.response.double_clicked() {
+                con.preview_image_rect = inner_rect;
             }
         });
 
         black_box(&mut ui[1], "right", |ui| {
             let mut inner_rect = Rect::NAN;
 
-            let f = |ui: &mut Ui| {
-                if let Some(im) = &con.image_data2 {
-                    ui.image(im);
-                }
-
-                inner_rect = ui.min_rect();
-            };
-
             let response = Scene::new()
                 .zoom_range(0.0..=f32::INFINITY)
-                .show(ui, &mut con.scene_rect2, f)
+                .show(ui, &mut con.image_rect, |ui: &mut Ui| {
+                    con.image_data.as_ref().map(|im| ui.image(im));
+                    inner_rect = ui.min_rect();
+                })
                 .response;
 
             if response.double_clicked() {
-                con.scene_rect2 = inner_rect;
+                con.image_rect = inner_rect;
             }
         });
     });
@@ -156,10 +164,10 @@ fn bounding_box(
         );
 
         let _ = egui_image_from_path(src_fn, dn_bbox, 1).map(|im| {
-            let h = ui
-                .ctx()
-                .load_texture("screenshot_demo2", im, Default::default());
-            *data = Some(h);
+            *data = Some(
+                ui.ctx()
+                    .load_texture("screenshot_demo2", im, Default::default()),
+            );
         });
     }
 }
@@ -168,7 +176,8 @@ fn table_ui(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::
     use egui_extras::{Column, TableBuilder};
 
     let available_height = ui.available_height();
-    let mut table = TableBuilder::new(ui)
+
+    TableBuilder::new(ui)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .column(Column::remainder())
         .column(Column::remainder())
@@ -177,11 +186,9 @@ fn table_ui(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::
         .column(Column::remainder())
         .auto_shrink(false)
         .min_scrolled_height(available_height.div(5.0))
-        .max_scroll_height(available_height.div(5.0));
-
-    table = table.sense(egui::Sense::click());
-
-    table
+        .max_scroll_height(available_height.div(5.0))
+        .striped(true)
+        .sense(egui::Sense::click())
         .header(20.0, |mut header| {
             header.col(|ui| {
                 egui::Sides::new().show(
@@ -208,25 +215,34 @@ fn table_ui(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::
             });
         })
         .body(|body| {
-            let img_ids = model.get_all_image_ids();
+            let mut img_ids = model.get_all_images().unwrap_or(vec![]);
             body.rows(18.0, img_ids.len(), |mut row| {
                 let idx = row.index();
-                let img = img_ids[idx];
+                let img = img_ids.get_mut(idx).unwrap();
 
                 row.set_selected(con.selection.contains(img.src_fn()));
                 row.set_overline(true);
 
                 row.col(|ui| {
-                    ui.label(img.src_fn());
+                    ui.label(img.id());
                 });
                 row.col(|ui| {
-                    ui.label(img.registration_channel.to_string());
+                    let res = ui.text_edit_singleline(&mut img.registration_buffer);
+                    if res.clicked_elsewhere() {
+                        img.refresh_channels();
+                    }
                 });
                 row.col(|ui| {
-                    ui.label(img.cell_channel.to_string());
+                    let res = ui.text_edit_singleline(&mut img.cell_buffer);
+                    if res.clicked_elsewhere() {
+                        img.refresh_channels();
+                    }
                 });
                 row.col(|ui| {
-                    ui.label(img.comarker_channel.to_string());
+                    let res = ui.text_edit_singleline(&mut img.comarker_buffer);
+                    if res.clicked_elsewhere() {
+                        img.refresh_channels();
+                    }
                 });
                 row.col(|ui| {
                     ui.label(img.conversion_status.to_str());
@@ -250,7 +266,7 @@ fn table_ui(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::
                 } else if clicked {
                     con.unselect_all();
                     con.toggle_selection(img, &row.response().ctx);
-                    con.on_image_selected(img, &row.response().ctx);
+                    con.on_image_selected(img, model);
                 }
             });
         });

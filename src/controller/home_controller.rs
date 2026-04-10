@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::model::Model;
 
 pub struct HomeController {
@@ -11,10 +13,6 @@ impl HomeController {
             name: "Arthur".to_owned(),
             age: 42,
         }
-    }
-
-    pub fn increment_age(&mut self, model: &mut Model) {
-        self.age += 1;
     }
 
     pub fn load_workspace(&mut self, model: &mut Model) -> Result<(), std::io::Error> {

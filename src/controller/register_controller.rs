@@ -70,14 +70,11 @@ impl RegisterController {
     }
 
     pub fn n_images(&self, model: &Model) -> usize {
-        model.workspace.as_ref().map(|w| w.n_images()).unwrap_or(0)
+        model.get_all_images().map(|w| w.len()).unwrap_or(0)
     }
 
-    pub fn get_image<'a>(&self, model: &'a mut Model, idx: &str) -> Option<&'a mut ImageMetadata> {
-        match model.workspace.as_mut() {
-            Some(ws) => ws.get_image(idx),
-            None => None,
-        }
+    pub fn get_image<'a>(&self, model: &'a mut Model, idx: &str) -> Option<ImageMetadata> {
+        model.get_image(idx)
     }
 
     pub fn toggle_selection(&mut self, im_md: &ImageMetadata, ctx: &Context) {

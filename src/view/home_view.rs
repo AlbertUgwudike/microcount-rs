@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use eframe::egui::{self, Ui};
 
 use crate::controller::HomeController;
@@ -13,14 +15,7 @@ pub fn ui_tab_home(model: &mut Model, con: &mut HomeController, ui: &mut Ui) {
         con.create_workspace(model);
     }
 
-    ui.label(format!(
-        "{}",
-        model
-            .workspace
-            .as_ref()
-            .map(|w| w.dir_name.as_ref())
-            .unwrap_or("None")
-    ));
+    ui.label(format!("{}", model.get_dir_name()));
 
     ui.image(egui::include_image!("../assets/microcount_logo.png"));
 }

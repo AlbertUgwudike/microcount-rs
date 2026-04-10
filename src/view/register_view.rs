@@ -177,10 +177,10 @@ fn table_ui(model: &mut Model, con: &mut RegisterController, ui: &mut egui::Ui) 
             });
         })
         .body(|body| {
-            let img_ids = model.get_all_image_ids();
+            let img_ids = model.get_all_images().unwrap_or(vec![]);
             body.rows(18.0, img_ids.len(), |mut row| {
                 let idx = row.index();
-                let img = img_ids[idx];
+                let img = &img_ids[idx];
 
                 row.set_selected(con.selection.contains(img.src_fn()));
                 row.set_overline(true);
