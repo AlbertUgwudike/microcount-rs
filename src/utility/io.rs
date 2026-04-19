@@ -49,6 +49,7 @@ pub fn egui_image_from_path(
     let rgb = stack_rgb(&image[0], &image[1], &image[2]);
     let im = array2rgb_buff(rgb);
     let (h, w) = image[0].dim();
+    println!("LEssgoo");
     let pixels = im.as_flat_samples();
     Ok(egui::ColorImage::from_rgb([w, h], pixels.as_slice()))
 }

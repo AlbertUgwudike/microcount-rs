@@ -4,6 +4,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use eframe::egui::{self, Color32, Rect, Scene, Sense, Stroke, TextureHandle, Ui, Vec2};
+use tokio::runtime::Handle;
 
 use crate::controller::SelectImagesController;
 use crate::model::Model;
@@ -27,13 +28,10 @@ pub fn ui_tab_select_images(
         if ui.button("Select All").clicked() {
             let curr_count = Arc::clone(&model.counter);
 
-            model.dispatch(true, move || {
+            model.dispatch(true, async move {
                 // simulate work
                 sleep(Duration::from_millis(1));
-                let _ = curr_count.lock().map(|mut v| {
-                    *v = *v + 1;
-                    println!("{}", "Gogol a yaho: ".to_string() + &v.to_string());
-                });
+                *curr_count.lock().await += 1;
             });
         }
     });
@@ -78,7 +76,10 @@ fn image_viewer(model: &mut Model, con: &mut SelectImagesController, ui: &mut eg
                 ui,
                 &mut con.preview_image_rect,
                 |ui| {
-                    image_matrix.lock().as_ref().map(|im| ui.image(im));
+                    image_matrix
+                        .try_lock()
+                        .map(|im| im.as_ref().map(|im| ui.image(im)));
+
                     image_metadata.map(|img| {
                         let pos = &mut con.pos_offset;
                         let sz = &mut con.sz_offset;

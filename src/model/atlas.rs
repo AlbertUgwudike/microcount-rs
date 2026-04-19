@@ -24,7 +24,7 @@ impl Atlas {
         let ann_path = format!("{}/assets/annotation.tiff", app_dir);
         let str_path = format!("{}/assets/structures.csv", app_dir);
 
-        println!("{}", ref_path);
+        // println!("{}", ref_path);
 
         let reference = read_tiff_region(&ref_path, (0, 0, 160, 228), 1)?;
         let reference = matrix_vec_to_volume(&reference).ok_or(ATLAS_READ_ERR)?;
@@ -36,7 +36,7 @@ impl Atlas {
         let s_table = csv::Reader::from_reader(s_reader)
             .deserialize::<StructureRow>()
             .filter_map(|a| {
-                println!("{:?}", a);
+                // println!("{:?}", a);
                 a.ok()
             })
             .collect();

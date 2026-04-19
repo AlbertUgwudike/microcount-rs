@@ -1,6 +1,7 @@
-use std::{path::Path, sync::Arc};
+use std::{path::Path, sync::Arc, time::Duration};
 
-use eframe::egui::{self, mutex::Mutex, Context, Rect, TextureHandle, Vec2};
+use eframe::egui::{self, Context, Rect, TextureHandle, Vec2};
+use tokio::sync::Mutex;
 
 use crate::{
     model::{ImageMetadata, Model, Workspace},
@@ -61,29 +62,48 @@ impl SelectImagesController {
         let ctx = Arc::clone(&model.frame);
         let src_fn = im_md.src_fn().to_owned();
 
-        self.set_place_holder(model);
+        model.dispatch_exclusive(ThreadLabel::SelectImagesLoadPreview, true, async move {
+            // for _ in 0..100 {
+            //     tokio::time::sleep(Duration::from_millis(10)).await;
+            // }
+            // return;
 
-        model.dispatch_exclusive(ThreadLabel::SelectImagesLoadPreview, true, move || {
-            let _ = egui_image_from_path(&src_fn, bbox, 25).map(|im| {
-                let h = ctx
-                    .lock()
-                    .unwrap()
-                    .load_texture("screenshot_demo", im, Default::default());
+            // let im = egui::ColorImage::from_rgb([1, 1], &[0u8, 0u8, 0u8]);
 
-                *id.lock() = Some(h);
-            });
+            // let h = ctx
+            //     .lock()
+            //     .await
+            //     .load_texture("placeholder", im, Default::default());
+
+            // *id.lock().await = Some(h);
+
+            let im = egui_image_from_path(&src_fn, bbox, 25);
+            let ctx = ctx.lock().await;
+
+            if im.is_ok() {
+                let im = im.unwrap();
+                println!("{:?}", im.size);
+                let h = ctx.load_texture("screenshot_demo", im, Default::default());
+
+                *id.lock().await = Some(h);
+            } else {
+                println!("{:?}", im.err().unwrap().to_string());
+            };
+
+            ctx.request_repaint();
+
+            println!("Repaint, requested")
         });
     }
 
-    fn set_place_holder(&self, model: &Model) {
+    async fn set_place_holder(&self, ctx: Arc<Mutex<Context>>) {
         let im = egui::ColorImage::from_rgb([1, 1], &[0u8, 0u8, 0u8]);
-        let h = model
-            .frame
+        let h = ctx
             .lock()
-            .unwrap()
+            .await
             .load_texture("placeholder", im, Default::default());
 
-        *self.preview_image_data.lock() = Some(h);
+        *self.preview_image_data.lock().await = Some(h);
     }
 
     pub fn unselect_all(&mut self) {

@@ -1,10 +1,11 @@
 use eframe::egui::Context;
 use rfd::FileDialog;
+use std::future::Future;
 use std::io::{self, Error};
 use std::path::Path;
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{collections::HashSet, fs};
+use tokio::sync::Mutex;
 
 use crate::concurrency::ThreadPool;
 use crate::model::{constants, Atlas, ConvertStatus, ImageMetadata, Workspace};
@@ -25,7 +26,7 @@ impl Model {
             workspace: None,
             atlas: Atlas::new(app_dir).unwrap(),
             counter: Arc::new(Mutex::new(0)),
-            threadpool: ThreadPool::new(),
+            threadpool: ThreadPool::new(5, 5),
             frame: Arc::new(Mutex::new(frame)),
         }
     }
@@ -155,20 +156,22 @@ impl Model {
     }
 
     fn save_workspace(&self) {
-        self.workspace.as_ref().and_then(|ws| {
-            let dir_name = self.get_dir_name();
+        self.workspace.as_ref().map(|ws| {
+            let dir_name = self.get_dir_name().clone();
             let folder = Path::new(&dir_name);
-            let ws_s = serde_json::to_string(&ws).unwrap();
-            fs::write(folder.join("ws.json"), ws_s).ok()
+            tokio::task::block_in_place(async move || {
+                let ws_s = serde_json::to_string(&*ws.lock().await).unwrap();
+                fs::write(folder.join("ws.json"), ws_s).ok();
+            });
         });
     }
 
     pub fn dispatch<F>(&self, repaint: bool, f: F)
     where
-        F: FnOnce() + Send + 'static,
+        F: Future<Output = ()> + Send + 'static,
     {
         if repaint {
-            self.threadpool.dispatch(self.wrap(f));
+            self.threadpool.dispatch(f);
         } else {
             self.threadpool.dispatch(f);
         }
@@ -176,23 +179,23 @@ impl Model {
 
     pub fn dispatch_exclusive<F>(&mut self, label: ThreadLabel, repaint: bool, f: F)
     where
-        F: FnOnce() + Send + 'static,
+        F: Future<Output = ()> + Send + 'static,
     {
         if repaint {
-            self.threadpool.dispatch_exclusive(label, self.wrap(f));
+            self.threadpool.dispatch_exclusive(f, label);
         } else {
-            self.threadpool.dispatch_exclusive(label, f);
+            self.threadpool.dispatch_exclusive(f, label);
         }
     }
 
-    fn wrap<F>(&self, f: F) -> Box<dyn FnOnce() + Send + 'static>
-    where
-        F: FnOnce() + Send + 'static,
-    {
-        let frame = Arc::clone(&self.frame);
-        Box::new(move || {
-            f();
-            frame.lock().unwrap().request_repaint();
-        })
-    }
+    // fn wrap<F>(&self, f: F) -> Box<dyn Future<Output = ()> + Send + 'static>
+    // where
+    //     F: Future<Output = ()> + Send + 'static,
+    // {
+    //     let frame = Arc::clone(&self.frame);
+    //     Box::new(move || {
+    //         f();
+    //         frame.lock().unwrap().request_repaint();
+    //     })
+    // }
 }

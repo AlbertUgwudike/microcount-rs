@@ -1,98 +1,76 @@
-use std::{
-    future::Future,
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        Arc, Mutex, MutexGuard,
-    },
-    thread::{self, JoinHandle},
-};
+use std::fmt::Debug;
+use std::hash::Hash;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::{collections::HashMap, future::Future};
 
-// type Job = Box<dyn FnOnce() + Send + 'static>;
-type Job = Box<dyn Future<Output = ()> + Send + 'static>;
+use tokio::sync::{mpsc, Semaphore};
+use tokio_util::sync::CancellationToken;
+
+type Job = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 pub struct ThreadPool<T> {
-    tx: Sender<(Option<T>, Job)>,
-    rx: Arc<Mutex<Receiver<(Option<T>, Job)>>>,
-    workers: Vec<Worker<T>>,
+    sender: mpsc::Sender<(Job, Option<T>)>,
 }
 
-impl<T: Copy + Send + PartialEq + 'static> ThreadPool<T> {
-    pub fn new() -> Self {
-        let (tx, rx) = channel::<(Option<T>, Job)>();
-        let rx = Arc::new(Mutex::new(rx));
-        let workers = (0..1).map(|i| Worker::new(i, Arc::clone(&rx))).collect();
-        ThreadPool { tx, rx, workers }
-    }
+impl<T: Send + 'static + Eq + Hash + Copy + Debug> ThreadPool<T> {
+    pub fn new(worker_limit: usize, queue_size: usize) -> Self {
+        let (tx, mut rx) = mpsc::channel::<(Job, Option<T>)>(queue_size);
+        let semaphore = Arc::new(Semaphore::new(worker_limit));
+        let hm: HashMap<T, CancellationToken> = HashMap::new();
+        let cache = Arc::new(Mutex::new(hm));
 
-    pub fn reset(&mut self, label: T) {
-        let mut idxs = vec![];
-        for (i, worker) in self.workers.iter_mut().enumerate() {
-            let option_mg = worker.label.try_lock().ok();
-            if let Some(mg) = option_mg {
-                if *mg == Some(label) {
-                    println!("Worker {} replaced!", worker.id);
-                    let id = worker.thread_handle.thread().id();
-                    idxs.push(i);
+        // dispatcher task
+        tokio::spawn({
+            let semaphore = Arc::clone(&semaphore);
+            let hm = Arc::clone(&cache);
+            println!("Job receieved!!");
+
+            async move {
+                while let Some((job, label)) = rx.recv().await {
+                    let permit = semaphore.clone();
+
+                    if let Some(l) = label {
+                        let token = CancellationToken::new();
+
+                        if let Some(ct) = hm.lock().unwrap().insert(l, token.clone()) {
+                            ct.cancel();
+                        }
+
+                        tokio::spawn(async move {
+                            tokio::select! {
+                                _ = token.cancelled() => {
+                                    println!("Job Cancelled");
+                                }
+                                _ = async {
+                                    let _ = permit.acquire().await.unwrap();
+                                    job.await;
+                                    println!("Job Completed");
+                                } => {}
+                            }
+                        });
+                    } else {
+                        job.await
+                    }
                 }
-            };
-        }
-
-        for idx in idxs {
-            self.workers[idx] = Worker::new(self.workers[idx].id, Arc::clone(&self.rx));
-        }
-        // self.workers
-        //     .iter_mut()
-        //     .filter(|w| *w.label.try_lock().unwrap_or(None.into()) == Some(label))
-        //     .for_each(|w| {
-        //         println!("Worker {} replaced!", w.id);
-        //         w.thread_handle.abort();
-        //         // println!("Worker {} replaced!", w.thread_handle.id());
-        //         *w = Worker::new(w.id, Arc::clone(&self.rx))
-        //     });
-    }
-
-    pub fn dispatch<F>(&self, f: F)
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        self.tx.send((None, Box::new(f))).unwrap();
-    }
-
-    pub fn dispatch_exclusive<F>(&mut self, label: T, f: F)
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        self.reset(label);
-        self.tx.send((Some(label), Box::new(f))).unwrap();
-    }
-}
-
-struct Worker<T> {
-    id: i32,
-    label: Arc<Mutex<Option<T>>>,
-    thread_handle: JoinHandle<()>,
-}
-
-impl<T: Copy + Send + 'static> Worker<T> {
-    pub fn new(id: i32, r: Arc<Mutex<Receiver<(Option<T>, Job)>>>) -> Self {
-        let w_label = Arc::new(Mutex::new(None));
-        let t_label = Arc::clone(&w_label);
-
-        let thread_handle = tokio::spawn(async {
-            loop {
-                let (label, job) = r.lock().unwrap().recv().unwrap();
-                println!("Worker {} received msg.", id);
-                *t_label.lock().unwrap() = label;
-                // std::pin::pin!(job);
-                job.await;
-                println!("Worker {} completed Job.", id);
             }
         });
 
-        Worker {
-            id,
-            label: w_label,
-            thread_handle,
-        }
+        Self { sender: tx }
+    }
+
+    pub fn dispatch<F>(&self, job: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        println!("Attempting send!");
+        let _ = self.sender.send((Box::pin(job), None));
+    }
+
+    pub fn dispatch_exclusive<F>(&self, job: F, label: T)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let _ = self.sender.try_send((Box::pin(job), Some(label)));
     }
 }

@@ -49,7 +49,7 @@ async fn main() -> eframe::Result {
     )
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ThreadLabel {
     SelectImagesLoadPreview,
 }
