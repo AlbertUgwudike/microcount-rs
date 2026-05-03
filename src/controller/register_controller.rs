@@ -1,19 +1,11 @@
-use std::path::Path;
-
-use csv::Error;
 use eframe::{
     egui::{Context, Rect, TextureHandle, Vec2},
     emath::TSTransform,
 };
 
 use crate::{
-    algorithm::proc::iter_align,
-    model::{self, atlas::Orientation, ImageMetadata, Model, Workspace},
-    utility::{
-        imops::{array2buff, egui_image_from_mat},
-        io::{egui_image_from_path, read_tiff_region},
-        types::ROI,
-    },
+    model::{atlas::Orientation, ImageMetadata, Model},
+    utility::{imops::egui_image_from_mat, io::egui_image_from_path},
 };
 
 pub struct RegisterController {
@@ -87,10 +79,14 @@ impl RegisterController {
 
     pub fn on_image_selected(&mut self, im_md: &ImageMetadata, ctx: &Context) {
         self.selected_img = Some(im_md.src_fn().to_string());
-        let bbox = (0, 0, im_md.size.1 - 1, im_md.size.0 - 1);
-        let _ = egui_image_from_path(im_md.src_fn(), bbox, 25).map(|im| {
-            let h = ctx.load_texture("screenshot_demo", im, Default::default());
-            self.image_data = Some(h);
+        let hw = ((im_md.size.1 - 1) as u64, (im_md.size.0 - 1) as u64);
+        tokio::task::block_in_place(async || {
+            egui_image_from_path(im_md.src_fn().into(), (0, 0), hw, 25)
+                .await
+                .map(|im| {
+                    let h = ctx.load_texture("screenshot_demo", im, Default::default());
+                    self.image_data = Some(h);
+                });
         });
     }
 
@@ -116,24 +112,24 @@ impl RegisterController {
     }
 
     pub fn register_button_pushed(&mut self, model: &mut Model) {
-        let moving = model
-            .atlas
-            .get_reference_img(self.atlas_orientation, self.slider_pos as isize)
-            .map(|&a| a as f32);
+        // let moving = model
+        //     .atlas
+        //     .get_reference_img(self.atlas_orientation, self.slider_pos as isize)
+        //     .map(|&a| a as f32);
 
-        self.selected_img.as_ref().map(|id| {
-            model.get_image(&id).map(|img_md| {
-                let bbox = (0, 0, img_md.size.1 - 1, img_md.size.0 - 1);
-                let res = read_tiff_region(img_md.src_fn(), bbox, 25);
-                match res {
-                    Ok(ims) => {
-                        let fixed = array2buff(ims[0].map(|&a| a as f32));
-                        let moving = array2buff(moving.t().to_owned());
-                        iter_align(&moving, &fixed);
-                    }
-                    Err(_) => {}
-                }
-            });
-        });
+        // self.selected_img.as_ref().map(|id| {
+        //     model.get_image(&id).map(|img_md| {
+        //         let bbox = (0, 0, img_md.size.1 - 1, img_md.size.0 - 1);
+        //         let res = read_tiff_region(img_md.src_fn(), bbox, 25);
+        //         match res {
+        //             Ok(ims) => {
+        //                 let fixed = array2buff(ims[0].map(|&a| a as f32));
+        //                 let moving = array2buff(moving.t().to_owned());
+        //                 iter_align(&moving, &fixed);
+        //             }
+        //             Err(_) => {}
+        //         }
+        //     });
+        // });
     }
 }

@@ -1,6 +1,6 @@
 use crate::utility::{
     io::{read_tiff_region, save_as_binary, save_as_luma8, save_as_rgb_bool},
-    types::{Pnt, Results, Settings, ROI},
+    types::{Pnt, Results, Settings},
 };
 
 use crate::algorithm::{
@@ -13,8 +13,13 @@ use crate::algorithm::{
 use ndarray::prelude::*;
 use scirs2_ndimage::morphology::binary_opening;
 
-pub fn from_fn(file_name: &str, roi: ROI, settings: Settings) -> Results {
-    let channels = read_tiff_region(file_name, roi, 1).expect("ReadFailure");
+pub fn from_fn(
+    file_name: &str,
+    origin: (u64, u64),
+    dims: (u64, u64),
+    settings: Settings,
+) -> Results {
+    let channels = read_tiff_region(file_name, origin, dims, 1).expect("ReadFailure");
     let iba1 = &(channels[2].map(|&a| a as f64));
     let cd68 = &(channels[1].map(|&a| a as f64));
 

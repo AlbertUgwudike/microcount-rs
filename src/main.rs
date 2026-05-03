@@ -5,17 +5,19 @@ pub mod model;
 pub mod utility;
 pub mod view;
 
-use std::sync::mpsc::{Receiver, Sender};
+use std::error::Error;
+use std::io;
 use std::sync::Arc;
 use std::thread::sleep;
 
 use eframe::egui::mutex::Mutex;
-use eframe::egui::{self, Context};
+use eframe::egui::{self, ColorImage, Context};
+use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::concurrency::ThreadPool;
 use crate::controller::{HomeController, RegisterController, SelectImagesController};
 use crate::model::{Model, Workspace};
-use crate::utility::io::{read_tiff_region, save_as_luma16};
+// use crate::utility::io::{read_tiff_region, save_as_luma16};
 use crate::view::{ui_tab_home, ui_tab_register, ui_tab_select_images};
 
 // fn main() {
@@ -52,6 +54,12 @@ async fn main() -> eframe::Result {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ThreadLabel {
     SelectImagesLoadPreview,
+    SelectImagesLoadImage,
+}
+
+pub enum ThreadResponse {
+    SelectImagesLoadPreview(io::Result<ColorImage>),
+    SelectImagesLoadImage(io::Result<ColorImage>),
 }
 
 enum Tab {
@@ -63,6 +71,7 @@ enum Tab {
 }
 
 struct MyApp {
+    reciever: Receiver<ThreadResponse>,
     selected_tab: Tab,
     model: model::Model,
     home_controller: HomeController,
@@ -73,10 +82,11 @@ struct MyApp {
 impl MyApp {
     fn new(frame: Context) -> Self {
         let dir_name = "/Users/albert/projects/microcount-rs/src".into();
-        println!("{}", dir_name);
+        let tp = ThreadPool::new(10, 10);
         Self {
+            reciever: tp.reciever,
             selected_tab: Tab::Home,
-            model: Model::new(dir_name, frame),
+            model: Model::new(dir_name, tp.sender),
             home_controller: HomeController::new(),
             select_images_controller: SelectImagesController::new(),
             register_controller: RegisterController::new(),
@@ -86,6 +96,19 @@ impl MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        while let Ok(msg) = self.reciever.try_recv() {
+            match msg {
+                ThreadResponse::SelectImagesLoadPreview(res) => {
+                    let h = ctx.load_texture("screenshot_demo", res.unwrap(), Default::default());
+                    self.select_images_controller.preview_image_data = Some(h)
+                }
+                ThreadResponse::SelectImagesLoadImage(res) => {
+                    let h = ctx.load_texture("screenshot_demo2", res.unwrap(), Default::default());
+                    self.select_images_controller.image_data = Some(h)
+                }
+            }
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("Home").clicked() {
@@ -113,7 +136,7 @@ impl eframe::App for MyApp {
                     ui_tab_select_images(&mut self.model, &mut self.select_images_controller, ui)
                 }
                 Tab::Register => {
-                    // ui_tab_register(&mut self.model, &mut self.register_controller, ui);
+                    ui_tab_register(&mut self.model, &mut self.register_controller, ui);
                 }
                 Tab::SelectRegions => {}
                 Tab::Analyse => {}

@@ -1,7 +1,6 @@
 use crate::utility::types::{Matrix, Volume};
 use eframe::egui::{self, ColorImage};
 use image::{ImageBuffer, Luma, Primitive, Rgb};
-use imageproc::definitions::Image;
 use ndarray::{concatenate, prelude::*, Slice};
 
 pub fn volume_to_matrix_vec<T: Clone>(

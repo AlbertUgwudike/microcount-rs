@@ -1,19 +1,16 @@
-use std::{path::Path, sync::Arc, time::Duration};
-
-use eframe::egui::{self, Context, Rect, TextureHandle, Vec2};
-use tokio::sync::Mutex;
+use eframe::egui::{self, Color32, Context, Rect, TextureHandle, Vec2};
 
 use crate::{
-    model::{ImageMetadata, Model, Workspace},
-    utility::{io::egui_image_from_path, types::ROI},
-    ThreadLabel,
+    model::{ImageMetadata, Model},
+    utility::io::egui_image_from_path,
+    ThreadLabel, ThreadResponse,
 };
 
 pub struct SelectImagesController {
     pub selection: std::collections::HashSet<String>,
     pub preview_image_rect: Rect,
     pub image_rect: Rect,
-    pub preview_image_data: Arc<Mutex<Option<TextureHandle>>>,
+    pub preview_image_data: Option<TextureHandle>,
     pub image_data: Option<TextureHandle>,
     pub pos_offset: Vec2,
     pub sz_offset: Vec2,
@@ -26,7 +23,7 @@ impl SelectImagesController {
             selection: Default::default(),
             preview_image_rect: Rect::ZERO,
             image_rect: Rect::ZERO,
-            preview_image_data: Arc::new(Mutex::new(None)),
+            preview_image_data: None,
             image_data: None,
             pos_offset: Vec2::ZERO,
             sz_offset: Vec2::new(200.0, 200.0),
@@ -54,56 +51,51 @@ impl SelectImagesController {
         }
     }
 
-    pub fn on_image_selected(&mut self, im_md: &ImageMetadata, model: &mut Model) {
-        self.selected_img = Some(im_md.src_fn().to_string());
-        let bbox = (0, 0, im_md.size.1 - 1, im_md.size.0 - 1);
-
-        let id = Arc::clone(&self.preview_image_data);
-        let ctx = Arc::clone(&model.frame);
+    pub fn on_image_selected(&mut self, im_md: &ImageMetadata, model: &mut Model, ctx: &Context) {
+        self.selected_img = Some(im_md.src_fn().to_string().clone());
+        let hw = ((im_md.size.1 - 1) as u64, (im_md.size.0 - 1) as u64);
         let src_fn = im_md.src_fn().to_owned();
 
+        self.set_place_holder(&ctx);
+
+        let ctx = ctx.clone();
+
         model.dispatch_exclusive(ThreadLabel::SelectImagesLoadPreview, true, async move {
-            // for _ in 0..100 {
-            //     tokio::time::sleep(Duration::from_millis(10)).await;
-            // }
-            // return;
-
-            // let im = egui::ColorImage::from_rgb([1, 1], &[0u8, 0u8, 0u8]);
-
-            // let h = ctx
-            //     .lock()
-            //     .await
-            //     .load_texture("placeholder", im, Default::default());
-
-            // *id.lock().await = Some(h);
-
-            let im = egui_image_from_path(&src_fn, bbox, 25);
-            let ctx = ctx.lock().await;
-
-            if im.is_ok() {
-                let im = im.unwrap();
-                println!("{:?}", im.size);
-                let h = ctx.load_texture("screenshot_demo", im, Default::default());
-
-                *id.lock().await = Some(h);
-            } else {
-                println!("{:?}", im.err().unwrap().to_string());
-            };
-
+            println!("Dispatch!");
+            let im = egui_image_from_path(src_fn, (0, 0), hw, 25).await;
             ctx.request_repaint();
-
-            println!("Repaint, requested")
+            println!("Repaint, requested");
+            ThreadResponse::SelectImagesLoadPreview(im)
         });
     }
 
-    async fn set_place_holder(&self, ctx: Arc<Mutex<Context>>) {
-        let im = egui::ColorImage::from_rgb([1, 1], &[0u8, 0u8, 0u8]);
-        let h = ctx
-            .lock()
-            .await
-            .load_texture("placeholder", im, Default::default());
+    pub fn on_subregion_selected(
+        model: &mut Model,
+        ctx: &Context,
+        src_fn: String,
+        hw: (u64, u64),
+        origin: (u64, u64),
+        data: &mut Option<TextureHandle>,
+    ) {
+        let ctx = ctx.clone();
+        Self::set_data_place_holder(data, &ctx);
+        model.dispatch_exclusive(ThreadLabel::SelectImagesLoadImage, true, async move {
+            let im = egui_image_from_path(src_fn, origin, hw, 1).await;
+            ctx.request_repaint();
+            ThreadResponse::SelectImagesLoadImage(im)
+        });
+    }
 
-        *self.preview_image_data.lock().await = Some(h);
+    fn set_place_holder(&mut self, ctx: &Context) {
+        let im = egui::ColorImage::filled([1000, 1500], Color32::BLACK);
+        let h = ctx.load_texture("placeholder", im, Default::default());
+        self.preview_image_data = Some(h);
+    }
+
+    fn set_data_place_holder(data: &mut Option<TextureHandle>, ctx: &Context) {
+        let im = egui::ColorImage::filled([1000, 1500], Color32::BLACK);
+        let h = ctx.load_texture("placeholder", im, Default::default());
+        *data = Some(h);
     }
 
     pub fn unselect_all(&mut self) {

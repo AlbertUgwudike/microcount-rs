@@ -2,7 +2,6 @@ use ndarray::prelude::*;
 use ndarray::OwnedRepr;
 
 pub type Pnt = (usize, usize);
-pub type ROI = (usize, usize, usize, usize);
 pub type Matrix<T> = ArrayBase<OwnedRepr<T>, Dim<[usize; 2]>>;
 pub type Volume<T> = ArrayBase<OwnedRepr<T>, Dim<[usize; 3]>>;
 

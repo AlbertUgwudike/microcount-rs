@@ -26,10 +26,10 @@ impl Atlas {
 
         // println!("{}", ref_path);
 
-        let reference = read_tiff_region(&ref_path, (0, 0, 160, 228), 1)?;
+        let reference = read_tiff_region(&ref_path, (0, 0), (160, 228), 1)?;
         let reference = matrix_vec_to_volume(&reference).ok_or(ATLAS_READ_ERR)?;
 
-        let annotation = read_tiff_region(&ann_path, (0, 0, 160, 228), 1)?;
+        let annotation = read_tiff_region(&ann_path, (0, 0), (160, 228), 1)?;
         let annotation = matrix_vec_to_volume(&annotation).ok_or(ATLAS_READ_ERR)?;
 
         let s_reader = fs::File::open(str_path)?;

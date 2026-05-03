@@ -50,13 +50,13 @@ impl ImageMetadata {
 
     pub fn set_metadata(&mut self) {
         let conv_fn = self.src_fn();
-        let _ = io::tiff_info(&conv_fn).map(|info| {
-            self.size = info.dimensions;
-            self.channel_count = info.n_channels;
-            self.registration_channel = 0;
-            self.cell_channel = 1 % (1 + info.n_channels);
-            self.comarker_channel = 2 % (1 + info.n_channels);
-        });
+        // let _ = io::tiff_info(&conv_fn).map(|info| {
+        //     self.size = info.dimensions;
+        //     self.channel_count = info.n_channels;
+        //     self.registration_channel = 0;
+        //     self.cell_channel = 1 % (1 + info.n_channels);
+        //     self.comarker_channel = 2 % (1 + info.n_channels);
+        // });
     }
 
     pub fn src_fn(&self) -> &str {

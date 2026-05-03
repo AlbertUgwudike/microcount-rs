@@ -1,14 +1,8 @@
+use eframe::egui::{self, Color32, Rect, Scene, Sense, Stroke, Ui, Vec2};
 use std::ops::Div;
-use std::sync::Arc;
-use std::thread::sleep;
-use std::time::Duration;
-
-use eframe::egui::{self, Color32, Rect, Scene, Sense, Stroke, TextureHandle, Ui, Vec2};
-use tokio::runtime::Handle;
 
 use crate::controller::SelectImagesController;
 use crate::model::Model;
-use crate::utility::io::egui_image_from_path;
 
 pub fn ui_tab_select_images(
     model: &mut Model,
@@ -26,13 +20,13 @@ pub fn ui_tab_select_images(
             model.convert_and_downsample(&con.selection);
         }
         if ui.button("Select All").clicked() {
-            let curr_count = Arc::clone(&model.counter);
+            // let curr_count = Arc::clone(&model.counter);
 
-            model.dispatch(true, async move {
-                // simulate work
-                sleep(Duration::from_millis(1));
-                *curr_count.lock().await += 1;
-            });
+            // model.dispatch(true, async move {
+            //     // simulate work
+            //     sleep(Duration::from_millis(1));
+            //     *curr_count.lock().await += 1;
+            // });
         }
     });
 
@@ -65,8 +59,6 @@ fn image_viewer(model: &mut Model, con: &mut SelectImagesController, ui: &mut eg
     ui.columns(2, |ui| {
         black_box(&mut ui[0], "left", |ui| {
             let mut inner_rect = Rect::NAN;
-
-            let image_matrix = con.preview_image_data.as_ref();
             let image_metadata = con
                 .selected_img
                 .as_ref()
@@ -76,16 +68,19 @@ fn image_viewer(model: &mut Model, con: &mut SelectImagesController, ui: &mut eg
                 ui,
                 &mut con.preview_image_rect,
                 |ui| {
-                    image_matrix
-                        .try_lock()
-                        .map(|im| im.as_ref().map(|im| ui.image(im)));
+                    con.preview_image_data.as_ref().map(|im| ui.image(im));
+                    let ctx = ui.ctx().clone();
 
                     image_metadata.map(|img| {
-                        let pos = &mut con.pos_offset;
-                        let sz = &mut con.sz_offset;
+                        let pos_offset = &mut con.pos_offset;
+                        let sz_offset = &mut con.sz_offset;
                         let data = &mut con.image_data;
-
-                        bounding_box(ui, img.src_fn(), pos, sz, data);
+                        let params = bounding_box(ui, img.src_fn(), pos_offset, sz_offset);
+                        if let Some((a, b, c)) = params {
+                            SelectImagesController::on_subregion_selected(
+                                model, &ctx, a, b, c, data,
+                            );
+                        }
                     });
 
                     inner_rect = ui.min_rect();
@@ -120,8 +115,7 @@ fn bounding_box(
     src_fn: &str,
     pos_offset: &mut Vec2,
     sz_offset: &mut Vec2,
-    data: &mut Option<TextureHandle>,
-) {
+) -> Option<(String, (u64, u64), (u64, u64))> {
     let r = ui.min_rect();
     let painter = ui.painter_at(r);
     let response = ui.interact(painter.clip_rect(), ui.id(), Sense::all());
@@ -157,19 +151,12 @@ fn bounding_box(
     if r_res.double_clicked() {
         let scaled_offset = *pos_offset * 25.0;
         let scaled_sz_offset = *sz_offset * 25.0;
-        let dn_bbox = (
-            scaled_offset.y as usize,
-            scaled_offset.x as usize,
-            scaled_sz_offset.y as usize,
-            scaled_sz_offset.x as usize,
-        );
-
-        let _ = egui_image_from_path(src_fn, dn_bbox, 1).map(|im| {
-            *data = Some(
-                ui.ctx()
-                    .load_texture("screenshot_demo2", im, Default::default()),
-            );
-        });
+        let origin = (scaled_offset.x as u64, scaled_offset.y as u64);
+        let hw = (scaled_sz_offset.y as u64, scaled_sz_offset.x as u64);
+        let src_fn = src_fn.to_owned();
+        Some((src_fn, hw, origin))
+    } else {
+        None
     }
 }
 
@@ -267,7 +254,7 @@ fn table_ui(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::
                 } else if clicked {
                     con.unselect_all();
                     con.toggle_selection(img, &row.response().ctx);
-                    con.on_image_selected(img, model);
+                    con.on_image_selected(img, model, &row.response().ctx);
                 }
             });
         });
