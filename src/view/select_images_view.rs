@@ -1,23 +1,20 @@
-use eframe::egui::{self, Color32, Rect, Scene, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{
+    self, Align, Color32, Layout, Rect, Scene, Sense, Sides, Stroke, StrokeKind, Ui, Vec2,
+};
 use std::ops::Div;
 
-use crate::controller::SelectImagesController;
-use crate::model::Model;
+use crate::{controller::SelectImagesController, view::black_box};
 
-pub fn ui_tab_select_images(
-    model: &mut Model,
-    con: &mut SelectImagesController,
-    ui: &mut egui::Ui,
-) {
+pub fn ui_tab_select_images(con: &mut SelectImagesController, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         if ui.button("Add Images").clicked() {
-            model.add_images();
+            con.add_images();
         }
         if ui.button("Remove Selected").clicked() {
-            model.add_images();
+            con.add_images();
         }
         if ui.button("Convert Selected").clicked() {
-            model.convert_and_downsample(&con.selection);
+            con.convert_and_downsample();
         }
         if ui.button("Select All").clicked() {
             // let curr_count = Arc::clone(&model.counter);
@@ -31,142 +28,19 @@ pub fn ui_tab_select_images(
     });
 
     ui.vertical(|ui| {
-        table_ui(model, con, ui);
-
+        table_ui(con, ui);
         ui.separator();
-
-        image_viewer(model, con, ui);
+        image_viewer(con, ui);
     });
 }
 
-fn black_box(ui: &mut Ui, name: &str, add_contents: impl FnOnce(&mut Ui) -> ()) {
-    egui::containers::Window::new(name.to_string())
-        .current_pos(ui.max_rect().min)
-        .max_size(ui.available_size())
-        .min_size(ui.available_size())
-        .interactable(false)
-        .title_bar(false)
-        .frame(
-            egui::Frame::new()
-                .corner_radius(0)
-                .fill(Color32::BLACK)
-                .outer_margin(0),
-        )
-        .show(ui.ctx(), add_contents);
-}
-
-fn image_viewer(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::Ui) {
-    ui.columns(2, |ui| {
-        black_box(&mut ui[0], "left", |ui| {
-            let mut inner_rect = Rect::NAN;
-            let image_metadata = con
-                .selected_img
-                .as_ref()
-                .and_then(|idx| con.get_image(model, idx.as_str()));
-
-            let scene = Scene::new().zoom_range(0.0..=f32::INFINITY).show(
-                ui,
-                &mut con.preview_image_rect,
-                |ui| {
-                    con.preview_image_data.as_ref().map(|im| ui.image(im));
-                    let ctx = ui.ctx().clone();
-
-                    image_metadata.map(|img| {
-                        let pos_offset = &mut con.pos_offset;
-                        let sz_offset = &mut con.sz_offset;
-                        let data = &mut con.image_data;
-                        let params = bounding_box(ui, img.src_fn(), pos_offset, sz_offset);
-                        if let Some((a, b, c)) = params {
-                            SelectImagesController::on_subregion_selected(
-                                model, &ctx, a, b, c, data,
-                            );
-                        }
-                    });
-
-                    inner_rect = ui.min_rect();
-                },
-            );
-
-            if scene.response.double_clicked() {
-                con.preview_image_rect = inner_rect;
-            }
-        });
-
-        black_box(&mut ui[1], "right", |ui| {
-            let mut inner_rect = Rect::NAN;
-
-            let response = Scene::new()
-                .zoom_range(0.0..=f32::INFINITY)
-                .show(ui, &mut con.image_rect, |ui: &mut Ui| {
-                    con.image_data.as_ref().map(|im| ui.image(im));
-                    inner_rect = ui.min_rect();
-                })
-                .response;
-
-            if response.double_clicked() {
-                con.image_rect = inner_rect;
-            }
-        });
-    });
-}
-
-fn bounding_box(
-    ui: &mut egui::Ui,
-    src_fn: &str,
-    pos_offset: &mut Vec2,
-    sz_offset: &mut Vec2,
-) -> Option<(String, (u64, u64), (u64, u64))> {
-    let r = ui.min_rect();
-    let painter = ui.painter_at(r);
-    let response = ui.interact(painter.clip_rect(), ui.id(), Sense::all());
-    let bbox_min = r.min + *pos_offset;
-    let bbox_max = r.min + *sz_offset + *pos_offset;
-
-    let bbox_rect = Rect::from_min_max(bbox_min, bbox_max);
-    painter.rect(
-        bbox_rect,
-        1.0,
-        Color32::TRANSPARENT,
-        Stroke::new(20.0, Color32::RED),
-        egui::StrokeKind::Middle,
-    );
-
-    let circ_rect = Rect::from_center_size(bbox_max, Vec2::new(40.0, 40.0));
-    painter.circle(bbox_max, 20.0, Color32::GREEN, Stroke::NONE);
-
-    let h_res = ui.interact(circ_rect, response.id.with(0), Sense::drag());
-    let _ = ui.interact(bbox_rect, response.id.with(1), Sense::drag());
-    let r_res = ui.interact(bbox_rect, response.id.with(1), Sense::click());
-
-    *pos_offset += r_res.drag_delta();
-    *sz_offset += h_res.drag_delta();
-
-    pos_offset.x = r
-        .x_range()
-        .clamp(r.x_range().clamp(pos_offset.x + sz_offset.x) - sz_offset.x);
-    pos_offset.y = r
-        .y_range()
-        .clamp(r.y_range().clamp(pos_offset.y + sz_offset.y) - sz_offset.y);
-
-    if r_res.double_clicked() {
-        let scaled_offset = *pos_offset * 25.0;
-        let scaled_sz_offset = *sz_offset * 25.0;
-        let origin = (scaled_offset.x as u64, scaled_offset.y as u64);
-        let hw = (scaled_sz_offset.y as u64, scaled_sz_offset.x as u64);
-        let src_fn = src_fn.to_owned();
-        Some((src_fn, hw, origin))
-    } else {
-        None
-    }
-}
-
-fn table_ui(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::Ui) {
+pub fn table_ui(con: &mut SelectImagesController, ui: &mut Ui) {
     use egui_extras::{Column, TableBuilder};
 
     let available_height = ui.available_height();
 
     TableBuilder::new(ui)
-        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+        .cell_layout(Layout::left_to_right(Align::Center))
         .column(Column::remainder())
         .column(Column::remainder())
         .column(Column::remainder())
@@ -176,10 +50,10 @@ fn table_ui(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::
         .min_scrolled_height(available_height.div(5.0))
         .max_scroll_height(available_height.div(5.0))
         .striped(true)
-        .sense(egui::Sense::click())
+        .sense(Sense::click())
         .header(20.0, |mut header| {
             header.col(|ui| {
-                egui::Sides::new().show(
+                Sides::new().show(
                     ui,
                     |ui| {
                         ui.strong("Image");
@@ -203,37 +77,39 @@ fn table_ui(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::
             });
         })
         .body(|body| {
-            let mut img_ids = model.get_all_images().unwrap_or(vec![]);
+            let img_ids = con.img_ids();
+            let img_cons = con.img_cons();
             body.rows(18.0, img_ids.len(), |mut row| {
                 let idx = row.index();
-                let img = img_ids.get_mut(idx).unwrap();
+                let img = img_ids.get(idx).unwrap();
+                let im_con = img_cons.get(idx).unwrap();
 
-                row.set_selected(con.selection.contains(img.src_fn()));
+                row.set_selected(con.selection_contains(img));
                 row.set_overline(true);
 
                 row.col(|ui| {
-                    ui.label(img.id());
+                    ui.label(img);
                 });
                 row.col(|ui| {
-                    let res = ui.text_edit_singleline(&mut img.registration_buffer);
+                    let res = ui.text_edit_singleline(con.reg_buffer(img));
                     if res.clicked_elsewhere() {
-                        img.refresh_channels();
+                        con.persist()
                     }
                 });
                 row.col(|ui| {
-                    let res = ui.text_edit_singleline(&mut img.cell_buffer);
+                    let res = ui.text_edit_singleline(con.cell_buffer(img));
                     if res.clicked_elsewhere() {
-                        img.refresh_channels();
+                        con.persist()
                     }
                 });
                 row.col(|ui| {
-                    let res = ui.text_edit_singleline(&mut img.comarker_buffer);
+                    let res = ui.text_edit_singleline(con.co_buffer(img));
                     if res.clicked_elsewhere() {
-                        img.refresh_channels();
+                        con.persist()
                     }
                 });
                 row.col(|ui| {
-                    ui.label(img.conversion_status.to_str());
+                    ui.label(im_con);
                 });
 
                 let mut modifier = false;
@@ -250,12 +126,110 @@ fn table_ui(model: &mut Model, con: &mut SelectImagesController, ui: &mut egui::
                 });
 
                 if modifier && clicked {
-                    con.toggle_selection(img, &row.response().ctx);
+                    con.toggle_selection(img);
                 } else if clicked {
                     con.unselect_all();
-                    con.toggle_selection(img, &row.response().ctx);
-                    con.on_image_selected(img, model, &row.response().ctx);
+                    con.toggle_selection(img);
+                    con.on_image_selected(img, &row.response().ctx);
                 }
             });
         });
+}
+
+pub fn image_viewer(con: &mut SelectImagesController, ui: &mut Ui) {
+    ui.columns(2, |ui| {
+        black_box(&mut ui[0], "left", |ui| {
+            let mut inner_rect = Rect::NAN;
+            let mut tmp = con.state.preview_image_rect;
+
+            let scene = Scene::new()
+                .zoom_range(0.0..=f32::INFINITY)
+                .show(ui, &mut tmp, |ui| {
+                    render_preview_img(con, ui);
+                    bounding_box(con, ui);
+                    inner_rect = ui.min_rect();
+                });
+
+            con.state.preview_image_rect = tmp;
+
+            if scene.response.double_clicked() {
+                con.state.preview_image_rect = inner_rect;
+            }
+        });
+
+        black_box(&mut ui[1], "right", |ui| {
+            let mut inner_rect = Rect::NAN;
+            let mut tmp = con.state.image_rect;
+
+            let response = Scene::new()
+                .zoom_range(0.0..=f32::INFINITY)
+                .show(ui, &mut tmp, |ui| {
+                    render_image(con, ui);
+                    inner_rect = ui.min_rect();
+                })
+                .response;
+
+            con.state.image_rect = tmp;
+
+            if response.double_clicked() {
+                con.state.image_rect = inner_rect;
+            }
+        });
+    });
+}
+
+pub fn render_preview_img(con: &SelectImagesController, ui: &mut Ui) {
+    con.state.preview_image_data.as_ref().map(|im| ui.image(im));
+}
+
+pub fn render_image(con: &SelectImagesController, ui: &mut Ui) {
+    con.state.image_data.as_ref().map(|im| ui.image(im));
+}
+
+pub fn bounding_box(con: &mut SelectImagesController, ui: &mut Ui) {
+    let r = ui.min_rect();
+    let painter = ui.painter_at(r);
+    let response = ui.interact(painter.clip_rect(), ui.id(), Sense::all());
+    let bbox_min = r.min + con.state.pos_offset;
+    let bbox_max = r.min + con.state.sz_offset + con.state.pos_offset;
+
+    let bbox_rect = Rect::from_min_max(bbox_min, bbox_max);
+    painter.rect(
+        bbox_rect,
+        1.0,
+        Color32::TRANSPARENT,
+        Stroke::new(20.0, Color32::RED),
+        StrokeKind::Middle,
+    );
+
+    let circ_rect = Rect::from_center_size(bbox_max, Vec2::new(40.0, 40.0));
+    painter.circle(bbox_max, 20.0, Color32::GREEN, Stroke::NONE);
+
+    let h_res = ui.interact(circ_rect, response.id.with(0), Sense::drag());
+    let _ = ui.interact(bbox_rect, response.id.with(1), Sense::drag());
+    let r_res = ui.interact(bbox_rect, response.id.with(1), Sense::click());
+
+    con.state.pos_offset += r_res.drag_delta();
+    con.state.sz_offset += h_res.drag_delta();
+
+    con.state.pos_offset.x = r.x_range().clamp(
+        r.x_range()
+            .clamp(con.state.pos_offset.x + con.state.sz_offset.x)
+            - con.state.sz_offset.x,
+    );
+
+    con.state.pos_offset.y = r.y_range().clamp(
+        r.y_range()
+            .clamp(con.state.pos_offset.y + con.state.sz_offset.y)
+            - con.state.sz_offset.y,
+    );
+
+    if r_res.double_clicked() {
+        let scaled_offset = con.state.pos_offset * 25.0;
+        let scaled_sz_offset = con.state.sz_offset * 25.0;
+        let origin = (scaled_offset.x as u64, scaled_offset.y as u64);
+        let hw = (scaled_sz_offset.y as u64, scaled_sz_offset.x as u64);
+        let im_id = con.state.selected_img.clone().unwrap(); //<---
+        con.on_subregion_selected(&im_id, hw, origin, ui.ctx());
+    };
 }

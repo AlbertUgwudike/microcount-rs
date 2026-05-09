@@ -1,6 +1,5 @@
 use std::{collections::HashMap, sync::Arc};
 
-use eframe::egui::mutex::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::model::ImageMetadata;

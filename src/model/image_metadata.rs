@@ -1,8 +1,9 @@
-use std::path::Path;
+use std::{io, path::Path};
 
+use ome_bioformats_rs::format_in::{tiff_reader::TiffReader, FormatReader};
 use serde::{Deserialize, Serialize};
 
-use crate::{model::DIR_CONVERT, utility::io};
+use crate::model::DIR_CONVERT;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ImageMetadata {
@@ -17,10 +18,6 @@ pub struct ImageMetadata {
     pub registration_channel: usize,
     pub cell_channel: usize,
     pub comarker_channel: usize,
-
-    pub registration_buffer: String,
-    pub cell_buffer: String,
-    pub comarker_buffer: String,
 
     pub conversion_status: ConvertStatus,
 }
@@ -41,22 +38,25 @@ impl ImageMetadata {
             cell_channel: 0,
             comarker_channel: 0,
             registration_channel: 0,
-            cell_buffer: String::new(),
-            comarker_buffer: String::new(),
-            registration_buffer: String::new(),
             conversion_status: ConvertStatus::Unconverted,
         }
     }
 
-    pub fn set_metadata(&mut self) {
+    pub fn set_metadata(&mut self) -> io::Result<()> {
         let conv_fn = self.src_fn();
-        // let _ = io::tiff_info(&conv_fn).map(|info| {
-        //     self.size = info.dimensions;
-        //     self.channel_count = info.n_channels;
-        //     self.registration_channel = 0;
-        //     self.cell_channel = 1 % (1 + info.n_channels);
-        //     self.comarker_channel = 2 % (1 + info.n_channels);
-        // });
+        TiffReader::new(conv_fn.into()).map(|im| {
+            let md = im.metadata();
+            let dim_zero = md.dimensions(0).unwrap();
+            self.size = (dim_zero.w as usize, dim_zero.h as usize);
+            self.channel_count = if md.series_count() > 0 {
+                md.series_count()
+            } else {
+                dim_zero.c as usize
+            };
+            self.registration_channel = 0;
+            self.cell_channel = 1 % (1 + self.channel_count);
+            self.comarker_channel = 2 % (1 + self.channel_count);
+        })
     }
 
     pub fn src_fn(&self) -> &str {
@@ -78,18 +78,28 @@ impl ImageMetadata {
         )
     }
 
-    pub fn refresh_channels(&mut self) {
-        str::parse::<usize>(&self.registration_buffer)
-            .map(|v| self.registration_channel = v)
-            .map_err(|_| self.registration_buffer = self.registration_channel.to_string());
+    pub fn update_cell_channel(&mut self, v: String) {
+        let _ = str::parse::<usize>(&v).map(|v| {
+            if v < self.channel_count {
+                self.cell_channel = v
+            }
+        });
+    }
 
-        str::parse::<usize>(&self.cell_buffer)
-            .map(|v| self.cell_channel = v)
-            .map_err(|_| self.cell_buffer = self.cell_channel.to_string());
+    pub fn update_comarker_channel(&mut self, v: String) {
+        let _ = str::parse::<usize>(&v).map(|v| {
+            if v < self.channel_count {
+                self.comarker_channel = v
+            }
+        });
+    }
 
-        str::parse::<usize>(&self.comarker_buffer)
-            .map(|v| self.comarker_channel = v)
-            .map_err(|_| self.comarker_buffer = self.comarker_channel.to_string());
+    pub fn update_reg_channel(&mut self, v: String) {
+        let _ = str::parse::<usize>(&v).map(|v| {
+            if v < self.channel_count {
+                self.registration_channel = v
+            }
+        });
     }
 }
 

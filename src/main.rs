@@ -5,31 +5,17 @@ pub mod model;
 pub mod utility;
 pub mod view;
 
-use std::error::Error;
+use std::cell::RefCell;
 use std::io;
-use std::sync::Arc;
-use std::thread::sleep;
+use std::rc::Rc;
 
-use eframe::egui::mutex::Mutex;
 use eframe::egui::{self, ColorImage, Context};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Receiver;
 
 use crate::concurrency::ThreadPool;
 use crate::controller::{HomeController, RegisterController, SelectImagesController};
-use crate::model::{Model, Workspace};
-// use crate::utility::io::{read_tiff_region, save_as_luma16};
+use crate::model::Model;
 use crate::view::{ui_tab_home, ui_tab_register, ui_tab_select_images};
-
-// fn main() {
-//     let img_fn = "/Users/albert/projects/microcount-rs/src/assets/test.tiff";
-//     let img_fn = "/Users/albert/Downloads/example_ws/ws_converted/24_3_21_7.2_conv.tiff";
-//     let out_fn = "/Users/albert/projects/microcount-rs/src/assets/test_out.tiff";
-//     read_tiff_region(img_fn, (5000, 5000, 4000, 4000), 2)
-//         .map(|r| {
-//             save_as_luma16(&r[2], out_fn);
-//         })
-//         .map_err(|err| println!("{:?}", err));
-// }
 
 #[tokio::main]
 async fn main() -> eframe::Result {
@@ -73,7 +59,7 @@ enum Tab {
 struct MyApp {
     reciever: Receiver<ThreadResponse>,
     selected_tab: Tab,
-    model: model::Model,
+    model: Rc<RefCell<Model>>,
     home_controller: HomeController,
     select_images_controller: SelectImagesController,
     register_controller: RegisterController,
@@ -83,13 +69,14 @@ impl MyApp {
     fn new(frame: Context) -> Self {
         let dir_name = "/Users/albert/projects/microcount-rs/src".into();
         let tp = ThreadPool::new(10, 10);
+        let model = Rc::new(RefCell::new(Model::new(dir_name, tp.sender)));
         Self {
             reciever: tp.reciever,
             selected_tab: Tab::Home,
-            model: Model::new(dir_name, tp.sender),
-            home_controller: HomeController::new(),
-            select_images_controller: SelectImagesController::new(),
-            register_controller: RegisterController::new(),
+            home_controller: HomeController::new(Rc::clone(&model)),
+            select_images_controller: SelectImagesController::new(Rc::clone(&model)),
+            register_controller: RegisterController::new(Rc::clone(&model)),
+            model: model,
         }
     }
 }
@@ -100,11 +87,11 @@ impl eframe::App for MyApp {
             match msg {
                 ThreadResponse::SelectImagesLoadPreview(res) => {
                     let h = ctx.load_texture("screenshot_demo", res.unwrap(), Default::default());
-                    self.select_images_controller.preview_image_data = Some(h)
+                    self.select_images_controller.state.preview_image_data = Some(h)
                 }
                 ThreadResponse::SelectImagesLoadImage(res) => {
                     let h = ctx.load_texture("screenshot_demo2", res.unwrap(), Default::default());
-                    self.select_images_controller.image_data = Some(h)
+                    self.select_images_controller.state.image_data = Some(h)
                 }
             }
         }
@@ -131,13 +118,9 @@ impl eframe::App for MyApp {
             ui.separator();
 
             match self.selected_tab {
-                Tab::Home => ui_tab_home(&mut self.model, &mut self.home_controller, ui),
-                Tab::SelectImages => {
-                    ui_tab_select_images(&mut self.model, &mut self.select_images_controller, ui)
-                }
-                Tab::Register => {
-                    ui_tab_register(&mut self.model, &mut self.register_controller, ui);
-                }
+                Tab::Home => self.home_controller.render(ui),
+                Tab::SelectImages => self.select_images_controller.render(ui),
+                Tab::Register => self.register_controller.render(ui),
                 Tab::SelectRegions => {}
                 Tab::Analyse => {}
             }

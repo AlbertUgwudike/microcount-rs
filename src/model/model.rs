@@ -1,9 +1,11 @@
 use eframe::egui::Context;
 use rfd::FileDialog;
+use std::cell::{Ref, RefCell};
 use std::future::Future;
 use std::io::{self, Error};
 use std::path::Path;
 use std::pin::{pin, Pin};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::{collections::HashSet, fs};
 use tokio::sync::mpsc::Sender;
@@ -11,7 +13,7 @@ use tokio::sync::Mutex;
 
 use crate::concurrency::ThreadPool;
 use crate::model::{constants, Atlas, ConvertStatus, ImageMetadata, Workspace};
-use crate::{ThreadResponse, ThreadLabel};
+use crate::{ThreadLabel, ThreadResponse};
 
 type MSender = Sender<(
     Pin<Box<dyn Future<Output = ThreadResponse> + Send + 'static>>,
@@ -34,56 +36,6 @@ impl Model {
         }
     }
 
-    pub fn create_workspace(&self) -> Result<(), Error> {
-        let folder_option = FileDialog::new().set_directory("/").save_file();
-
-        let folder = match folder_option {
-            Some(f) => f,
-            None => return Err(Error::new(std::io::ErrorKind::NotADirectory, "")),
-        };
-
-        fs::create_dir(folder.to_owned());
-
-        let ws = Workspace::new(folder.to_str().unwrap().into());
-        let ws_s = serde_json::to_string(&ws).unwrap();
-        fs::write(folder.join("ws.json"), ws_s);
-
-        let join_path = |slug: &str| folder.join(slug);
-
-        fs::create_dir(join_path(constants::DIR_CONVERT));
-        fs::create_dir(join_path(constants::DIR_DOWN));
-        fs::create_dir(join_path(constants::DIR_PROC));
-        fs::create_dir(join_path(constants::DIR_MASK))
-    }
-
-    pub fn load_workspace(&mut self) -> Result<(), Error> {
-        let folder_option = FileDialog::new().set_directory("/").pick_folder();
-
-        let ws_dir = match folder_option {
-            Some(f) => f,
-            None => return Err(Error::new(std::io::ErrorKind::NotADirectory, "")),
-        };
-
-        let ws_s = match fs::read(Path::new(&ws_dir).join("ws.json")) {
-            Ok(v) => match String::from_utf8(v) {
-                Ok(s) => s,
-                Err(err) => {
-                    return Err(Error::new(std::io::ErrorKind::InvalidData, err.to_string()))
-                }
-            },
-            Err(err) => return Err(err),
-        };
-
-        let ws = match serde_json::from_str::<Workspace>(&ws_s) {
-            Ok(w) => w,
-            Err(err) => return Err(Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
-        };
-
-        self.workspace = Some(ws);
-
-        Ok(())
-    }
-
     pub fn get_dir_name(&self) -> String {
         self.workspace
             .as_ref()
@@ -97,8 +49,10 @@ impl Model {
                 Some(files) => {
                     files.iter().for_each(|file| {
                         let mut img = ImageMetadata::new(file.to_str().unwrap(), &ws.dir_name);
-                        img.set_metadata();
-                        ws.images.insert(img.src_fn().to_string(), img);
+                        let res = img.set_metadata();
+                        if res.is_ok() {
+                            ws.images.insert(img.id().to_string(), img);
+                        }
                     });
 
                     self.save_workspace();
@@ -129,23 +83,21 @@ impl Model {
 
     fn downsample(img: &mut ImageMetadata) {}
 
-    pub fn get_all_images(&self) -> io::Result<Vec<ImageMetadata>> {
+    pub fn get_image(&self, im_id: &String) -> Option<&ImageMetadata> {
+        self.workspace
+            .as_ref()
+            .map(|ws| ws.images.get(im_id))
+            .flatten()
+    }
+
+    pub fn with_images<R>(&self, f: impl FnOnce(Vec<&ImageMetadata>) -> R) {
         if let Some(ws) = &self.workspace {
-            Ok(ws.images.clone().into_values().collect())
-        } else {
-            Err(Error::other("No workspace loaded!"))
+            let images: Vec<&ImageMetadata> = ws.images.values().collect();
+            f(images);
         }
     }
 
-    pub fn get_image(&self, id: &str) -> Option<ImageMetadata> {
-        if let Some(ws) = &self.workspace {
-            ws.images.get(id).cloned()
-        } else {
-            None
-        }
-    }
-
-    fn save_workspace(&self) {
+    pub fn save_workspace(&self) {
         self.workspace.as_ref().map(|ws| {
             let dir_name = self.get_dir_name().clone();
             let folder = Path::new(&dir_name);
@@ -165,7 +117,7 @@ impl Model {
         }
     }
 
-    pub fn dispatch_exclusive<F>(&mut self, label: ThreadLabel, repaint: bool, f: F)
+    pub fn dispatch_exclusive<F>(&self, label: ThreadLabel, repaint: bool, f: F)
     where
         F: Future<Output = ThreadResponse> + Send + 'static,
     {

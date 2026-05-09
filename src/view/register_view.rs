@@ -9,19 +9,19 @@ use crate::model::Model;
 use crate::utility::imops::egui_image_from_mat;
 use crate::utility::io::egui_image_from_path;
 
-pub fn ui_tab_register(model: &mut Model, con: &mut RegisterController, ui: &mut egui::Ui) {
+pub fn ui_tab_register(con: &mut RegisterController, ui: &mut egui::Ui, model: &Model) {
     ui.vertical(|ui| {
-        table_ui(model, con, ui);
+        table_ui(con, ui, model);
 
         ui.separator();
 
         if ui.button("Register").clicked() {
-            con.register_button_pushed(model);
+            con.register_button_pushed();
         }
 
         ui.separator();
 
-        image_viewer(model, con, ui);
+        image_viewer(con, ui, model);
     });
 }
 
@@ -41,7 +41,7 @@ fn black_box(ui: &mut Ui, name: &str, add_contents: impl FnOnce(&mut Ui) -> ()) 
         .show(ui.ctx(), add_contents);
 }
 
-fn image_viewer(model: &mut Model, con: &mut RegisterController, ui: &mut egui::Ui) {
+fn image_viewer(con: &mut RegisterController, ui: &mut egui::Ui, model: &Model) {
     ui.columns(2, |ui| {
         black_box(&mut ui[0], "left", |ui| {
             ui.vertical(|ui| {
@@ -141,7 +141,7 @@ fn draw_hex(pos: &mut [(f32, f32); 6], scale: f32, ui: &mut egui::Ui) {
     }
 }
 
-fn table_ui(model: &mut Model, con: &mut RegisterController, ui: &mut egui::Ui) {
+fn table_ui(con: &mut RegisterController, ui: &mut egui::Ui, model: &Model) {
     use egui_extras::{Column, TableBuilder};
 
     let available_height = ui.available_height();
@@ -177,44 +177,45 @@ fn table_ui(model: &mut Model, con: &mut RegisterController, ui: &mut egui::Ui) 
             });
         })
         .body(|body| {
-            let img_ids = model.get_all_images().unwrap_or(vec![]);
-            body.rows(18.0, img_ids.len(), |mut row| {
-                let idx = row.index();
-                let img = &img_ids[idx];
+            model.with_images(|img_ids| {
+                body.rows(18.0, img_ids.len(), |mut row| {
+                    let idx = row.index();
+                    let img = &img_ids[idx];
 
-                row.set_selected(con.selection.contains(img.src_fn()));
-                row.set_overline(true);
+                    row.set_selected(con.selection.contains(img.src_fn()));
+                    row.set_overline(true);
 
-                row.col(|ui| {
-                    ui.label(img.src_fn());
-                });
-                row.col(|ui| {
-                    ui.label(img.registration_channel.to_string());
-                });
-                row.col(|ui| {
-                    ui.label(img.cell_channel.to_string());
-                });
+                    row.col(|ui| {
+                        ui.label(img.src_fn());
+                    });
+                    row.col(|ui| {
+                        ui.label(img.registration_channel.to_string());
+                    });
+                    row.col(|ui| {
+                        ui.label(img.cell_channel.to_string());
+                    });
 
-                let mut modifier = false;
-                let mut clicked = false;
+                    let mut modifier = false;
+                    let mut clicked = false;
 
-                if row.response().clicked() {
-                    clicked = true
-                }
+                    if row.response().clicked() {
+                        clicked = true
+                    }
 
-                row.response().ctx.input(|i| {
-                    if i.key_down(egui::Key::Space) {
-                        modifier = true;
+                    row.response().ctx.input(|i| {
+                        if i.key_down(egui::Key::Space) {
+                            modifier = true;
+                        }
+                    });
+
+                    if modifier && clicked {
+                        con.toggle_selection(img, &row.response().ctx);
+                    } else if clicked {
+                        con.unselect_all();
+                        con.toggle_selection(img, &row.response().ctx);
+                        con.on_image_selected(img, &row.response().ctx);
                     }
                 });
-
-                if modifier && clicked {
-                    con.toggle_selection(img, &row.response().ctx);
-                } else if clicked {
-                    con.unselect_all();
-                    con.toggle_selection(img, &row.response().ctx);
-                    con.on_image_selected(img, &row.response().ctx);
-                }
             });
         });
 }

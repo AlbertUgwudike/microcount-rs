@@ -1,14 +1,18 @@
+use std::{cell::RefCell, rc::Rc};
+
 use eframe::{
-    egui::{Context, Rect, TextureHandle, Vec2},
+    egui::{Context, Rect, TextureHandle, Ui, Vec2},
     emath::TSTransform,
 };
 
 use crate::{
     model::{atlas::Orientation, ImageMetadata, Model},
     utility::{imops::egui_image_from_mat, io::egui_image_from_path},
+    view::{register_view, select_images_view},
 };
 
 pub struct RegisterController {
+    model: Rc<RefCell<Model>>,
     pub selection: std::collections::HashSet<String>,
     pub scene_rect: Rect,
     pub scene_rect2: Rect,
@@ -24,8 +28,9 @@ pub struct RegisterController {
 }
 
 impl RegisterController {
-    pub fn new() -> RegisterController {
+    pub fn new(model: Rc<RefCell<Model>>) -> RegisterController {
         Self {
+            model,
             selection: Default::default(),
             scene_rect: Rect::ZERO,
             scene_rect2: Rect::ZERO,
@@ -61,12 +66,13 @@ impl RegisterController {
         }
     }
 
-    pub fn n_images(&self, model: &Model) -> usize {
-        model.get_all_images().map(|w| w.len()).unwrap_or(0)
-    }
-
-    pub fn get_image<'a>(&self, model: &'a mut Model, idx: &str) -> Option<ImageMetadata> {
-        model.get_image(idx)
+    pub fn n_images(&self) -> usize {
+        self.model
+            .borrow()
+            .workspace
+            .as_ref()
+            .map(|ws| ws.images.len())
+            .unwrap_or(0)
     }
 
     pub fn toggle_selection(&mut self, im_md: &ImageMetadata, ctx: &Context) {
@@ -102,7 +108,7 @@ impl RegisterController {
         }
     }
 
-    pub fn on_atlas_interact(&mut self, model: &mut Model, ctx: &Context) {
+    pub fn on_atlas_interact(&mut self, model: &Model, ctx: &Context) {
         let mat = model
             .atlas
             .get_reference_img(self.atlas_orientation, self.slider_pos as isize);
@@ -111,7 +117,7 @@ impl RegisterController {
         self.image_data2 = Some(h);
     }
 
-    pub fn register_button_pushed(&mut self, model: &mut Model) {
+    pub fn register_button_pushed(&mut self) {
         // let moving = model
         //     .atlas
         //     .get_reference_img(self.atlas_orientation, self.slider_pos as isize)
@@ -131,5 +137,10 @@ impl RegisterController {
         //         }
         //     });
         // });
+    }
+
+    pub fn render(&mut self, ui: &mut Ui) {
+        let model = Rc::clone(&self.model);
+        register_view::ui_tab_register(self, ui, &model.borrow());
     }
 }
