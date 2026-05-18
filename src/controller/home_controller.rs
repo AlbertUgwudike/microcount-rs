@@ -70,17 +70,17 @@ impl HomeController {
             None => return Err(Error::new(std::io::ErrorKind::NotADirectory, "")),
         };
 
-        fs::create_dir(folder.to_owned());
+        fs::create_dir(folder.to_owned())?;
 
         let ws = Workspace::new(folder.to_str().unwrap().into());
         let ws_s = serde_json::to_string(&ws).unwrap();
-        fs::write(folder.join("ws.json"), ws_s);
+        fs::write(folder.join("ws.json"), ws_s)?;
 
         let join_path = |slug: &str| folder.join(slug);
 
-        fs::create_dir(join_path(constants::DIR_CONVERT));
-        fs::create_dir(join_path(constants::DIR_DOWN));
-        fs::create_dir(join_path(constants::DIR_PROC));
+        fs::create_dir(join_path(constants::DIR_CONVERT))?;
+        fs::create_dir(join_path(constants::DIR_DOWN))?;
+        fs::create_dir(join_path(constants::DIR_PROC))?;
         fs::create_dir(join_path(constants::DIR_MASK))
     }
 

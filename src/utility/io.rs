@@ -27,13 +27,13 @@ pub fn read_tiff_region(
 
     if md.series_count() > 1 {
         for s in 0..md.series_count() {
-            let origin = Loc::new(x, y, 0, 0, 0, s as u64);
-            pxs_vec.push(tr.open_pixels(origin, h, w, df)?);
+            let origin = Loc::new(x, y, 0, 0, 0, s as u64, h, w);
+            pxs_vec.push(tr.open_pixels(origin, df)?);
         }
     } else {
         for c in 0..md.dimensions(0).unwrap().c {
-            let origin = Loc::new(x, y, 0, c as u64, 0, 0);
-            pxs_vec.push(tr.open_pixels(origin, h, w, df)?);
+            let origin = Loc::new(x, y, 0, c as u64, 0, 0, h, w);
+            pxs_vec.push(tr.open_pixels(origin, df)?);
         }
     }
 
@@ -56,13 +56,29 @@ pub async fn read_tiff_region_as(
 
     if md.series_count() > 1 {
         for s in 0..md.series_count() {
-            let origin = Loc::new(x, y, 0, 0, 0, s as u64);
-            pxs_vec.push(tr.open_pixels_as(origin, h, w, df).await?);
+            let loc = Loc::new(x, y, 0, 0, 0, s as u64, h, w);
+            let mut chunky_reader = tr.open_pixels_chunky(loc, df)?;
+
+            let mut data = chunky_reader.step()?;
+            while data.is_none() {
+                data = chunky_reader.step()?;
+                tokio::task::yield_now().await;
+            }
+
+            pxs_vec.push(data.unwrap())
         }
     } else {
         for c in 0..md.dimensions(0).unwrap().c {
-            let origin = Loc::new(x, y, 0, c as u64, 0, 0);
-            pxs_vec.push(tr.open_pixels_as(origin, h, w, df).await?);
+            let loc = Loc::new(x, y, 0, c as u64, 0, 0, h, w);
+            let mut chunky_reader = tr.open_pixels_chunky(loc, df)?;
+
+            let mut data = chunky_reader.step()?;
+            while data.is_none() {
+                data = chunky_reader.step()?;
+                tokio::task::yield_now().await;
+            }
+
+            pxs_vec.push(data.unwrap())
         }
     }
 

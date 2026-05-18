@@ -1,10 +1,13 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use eframe::egui::{self, Color32, Context, Rect, TextureHandle, Ui, Vec2};
+use ome_bioformats_rs::convert::{format_converter::ConverterProgress, FormatConverter};
 
 use crate::{
-    model::Model, utility::io::egui_image_from_path, view::ui_tab_select_images, ThreadLabel,
-    ThreadResponse,
+    model::{ConvertStatus, Model},
+    utility::io::egui_image_from_path,
+    view::ui_tab_select_images,
+    ThreadLabel, ThreadResponse,
 };
 
 pub struct SelectImagesState {
@@ -56,12 +59,42 @@ impl SelectImagesController {
         let _ = self.model.borrow_mut().add_images();
     }
 
-    pub fn convert_and_downsample(&self) {
-        let _ = self
-            .model
-            .borrow_mut()
-            .convert_and_downsample(&self.state.selection);
+    pub fn convert_and_downsample(&mut self) {
+        for idx in self.state.selection.clone() {
+            self.set_conversion_status(&idx, ConvertStatus::Converting(0.0));
+            self.convert(&idx);
+        }
     }
+
+    fn convert(&mut self, im_id: &String) {
+        let md = self.model.borrow_mut();
+        let img = md.get_image(im_id).unwrap();
+        let im_id = im_id.to_string();
+        let input = img.src_fn().into();
+        let output = img.conv_fn().into();
+        let t_sender = Arc::clone(&md.thread_sender);
+
+        md.dispatch(false, async move {
+            let mut converter = FormatConverter::new(input, output, 100).unwrap();
+
+            let mut progress = converter.step().unwrap();
+            while let ConverterProgress::Converting(a, b) = progress {
+                let percentage = 100.0 * a as f64 / b as f64;
+                let _ = t_sender.try_send(ThreadResponse::Convert(im_id.clone(), percentage));
+                progress = converter.step().unwrap();
+            }
+        });
+    }
+
+    fn set_conversion_status(&self, im_id: &String, status: ConvertStatus) {
+        let mut md = self.model.borrow_mut();
+        md.workspace.as_mut().map(|ws| {
+            let im_md = ws.images.get_mut(im_id).unwrap();
+            im_md.conversion_status = status;
+        });
+    }
+
+    fn downsample(img: &String) {}
 
     pub fn n_images(&self) -> usize {
         self.model
@@ -191,13 +224,14 @@ impl SelectImagesController {
         let hw = ((im_md.size.1 - 1) as u64, (im_md.size.0 - 1) as u64);
         let src_fn = im_md.src_fn().to_owned();
         let ctx = ctx.clone();
+        let ttx = Arc::clone(&md.thread_sender);
 
         md.dispatch_exclusive(ThreadLabel::SelectImagesLoadPreview, true, async move {
             println!("Dispatch!");
             println!("({}, {})", hw.0, hw.1);
             let im = egui_image_from_path(src_fn, (0, 0), hw, 25).await;
             ctx.request_repaint();
-            ThreadResponse::SelectImagesLoadPreview(im)
+            ttx.send(ThreadResponse::SelectImagesLoadPreview(im)).await;
         });
     }
 
@@ -214,6 +248,7 @@ impl SelectImagesController {
         let im_md = md.get_image(im_id).unwrap();
         let src_fn = im_md.src_fn().to_owned();
         let ctx = ctx.clone();
+        let ttx = Arc::clone(&md.thread_sender);
 
         self.model.borrow().dispatch_exclusive(
             ThreadLabel::SelectImagesLoadImage,
@@ -221,7 +256,7 @@ impl SelectImagesController {
             async move {
                 let im = egui_image_from_path(src_fn, origin, hw, 1).await;
                 ctx.request_repaint();
-                ThreadResponse::SelectImagesLoadImage(im)
+                ttx.send(ThreadResponse::SelectImagesLoadImage(im)).await;
             },
         );
     }

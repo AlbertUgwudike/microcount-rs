@@ -10,11 +10,13 @@ use std::io;
 use std::rc::Rc;
 
 use eframe::egui::{self, ColorImage, Context};
+use ome_bioformats_rs::convert::format_converter::ConverterProgress;
+use ome_bioformats_rs::convert::FormatConverter;
 use tokio::sync::mpsc::Receiver;
 
 use crate::concurrency::ThreadPool;
 use crate::controller::{HomeController, RegisterController, SelectImagesController};
-use crate::model::Model;
+use crate::model::{ConvertStatus, Model};
 use crate::view::{ui_tab_home, ui_tab_register, ui_tab_select_images};
 
 #[tokio::main]
@@ -46,6 +48,7 @@ pub enum ThreadLabel {
 pub enum ThreadResponse {
     SelectImagesLoadPreview(io::Result<ColorImage>),
     SelectImagesLoadImage(io::Result<ColorImage>),
+    Convert(String, f64),
 }
 
 enum Tab {
@@ -58,8 +61,8 @@ enum Tab {
 
 struct MyApp {
     reciever: Receiver<ThreadResponse>,
-    selected_tab: Tab,
     model: Rc<RefCell<Model>>,
+    selected_tab: Tab,
     home_controller: HomeController,
     select_images_controller: SelectImagesController,
     register_controller: RegisterController,
@@ -69,14 +72,19 @@ impl MyApp {
     fn new(frame: Context) -> Self {
         let dir_name = "/Users/albert/projects/microcount-rs/src".into();
         let tp = ThreadPool::new(10, 10);
-        let model = Rc::new(RefCell::new(Model::new(dir_name, tp.sender)));
+        let model = Rc::new(RefCell::new(Model::new(
+            dir_name,
+            tp.sender,
+            tp.thread_sender,
+        )));
+
         Self {
             reciever: tp.reciever,
             selected_tab: Tab::Home,
             home_controller: HomeController::new(Rc::clone(&model)),
             select_images_controller: SelectImagesController::new(Rc::clone(&model)),
             register_controller: RegisterController::new(Rc::clone(&model)),
-            model: model,
+            model,
         }
     }
 }
@@ -92,6 +100,13 @@ impl eframe::App for MyApp {
                 ThreadResponse::SelectImagesLoadImage(res) => {
                     let h = ctx.load_texture("screenshot_demo2", res.unwrap(), Default::default());
                     self.select_images_controller.state.image_data = Some(h)
+                }
+                ThreadResponse::Convert(im_id, progress) => {
+                    let mut md = self.model.borrow_mut();
+                    md.workspace.as_mut().map(|ws| {
+                        let im_md = ws.images.get_mut(&im_id).unwrap();
+                        im_md.conversion_status = ConvertStatus::Converting(progress);
+                    });
                 }
             }
         }

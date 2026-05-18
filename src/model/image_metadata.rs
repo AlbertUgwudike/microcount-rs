@@ -5,6 +5,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::DIR_CONVERT;
 
+struct Raw {
+    pub conversion_status: ConvertStatus,
+}
+
+struct Converted {
+    pub size: (usize, usize),
+    down_size: (usize, usize),
+
+    pub channel_count: usize,
+    pub registration_channel: usize,
+    pub cell_channel: usize,
+    pub comarker_channel: usize,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ImageMetadata {
     source_fn: String,
@@ -106,16 +120,16 @@ impl ImageMetadata {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub enum ConvertStatus {
     Unconverted,
-    Converting,
+    Converting(f64),
     Converted,
 }
 
 impl ConvertStatus {
-    pub fn to_str(&self) -> &str {
+    pub fn to_str(&self) -> String {
         match self {
-            Self::Unconverted => "Unconverted",
-            Self::Converting => "Converting",
-            Self::Converted => "Converted",
+            Self::Unconverted => "Unconverted".into(),
+            Self::Converting(p) => format!("{}", p.to_string()),
+            Self::Converted => "Converted".into(),
         }
     }
 }
