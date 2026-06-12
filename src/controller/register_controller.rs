@@ -6,9 +6,9 @@ use eframe::{
 };
 
 use crate::{
-    model::{atlas::Orientation, ImageMetadata, Model},
+    model::{atlas::Orientation, image_metadata::Converted, ImageMetadata, Model},
     utility::{imops::egui_image_from_mat, io::egui_image_from_path},
-    view::{register_view, select_images_view},
+    view::register_view,
 };
 
 pub struct RegisterController {
@@ -66,26 +66,20 @@ impl RegisterController {
         }
     }
 
-    pub fn n_images(&self) -> usize {
-        self.model
-            .borrow()
-            .workspace
-            .as_ref()
-            .map(|ws| ws.images.len())
-            .unwrap_or(0)
-    }
-
-    pub fn toggle_selection(&mut self, im_md: &ImageMetadata, ctx: &Context) {
-        if self.selection.contains(im_md.src_fn()) {
-            self.selection.remove(im_md.src_fn());
+    pub fn toggle_selection(&mut self, im_md: &ImageMetadata<Converted>, ctx: &Context) {
+        if self.selection.contains(&im_md.src_fn()) {
+            self.selection.remove(&im_md.src_fn());
         } else {
             self.selection.insert(im_md.src_fn().to_string());
         }
     }
 
-    pub fn on_image_selected(&mut self, im_md: &ImageMetadata, ctx: &Context) {
+    pub fn on_image_selected(&mut self, im_md: &ImageMetadata<Converted>, ctx: &Context) {
         self.selected_img = Some(im_md.src_fn().to_string());
-        let hw = ((im_md.size.1 - 1) as u64, (im_md.size.0 - 1) as u64);
+        let hw = (
+            (im_md.state.size.1 - 1) as u64,
+            (im_md.state.size.0 - 1) as u64,
+        );
         tokio::task::block_in_place(async || {
             egui_image_from_path(im_md.src_fn().into(), (0, 0), hw, 25)
                 .await

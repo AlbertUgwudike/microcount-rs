@@ -10,14 +10,11 @@ use std::io;
 use std::rc::Rc;
 
 use eframe::egui::{self, ColorImage, Context};
-use ome_bioformats_rs::convert::format_converter::ConverterProgress;
-use ome_bioformats_rs::convert::FormatConverter;
 use tokio::sync::mpsc::Receiver;
 
 use crate::concurrency::ThreadPool;
 use crate::controller::{HomeController, RegisterController, SelectImagesController};
 use crate::model::{ConvertStatus, Model};
-use crate::view::{ui_tab_home, ui_tab_register, ui_tab_select_images};
 
 #[tokio::main]
 async fn main() -> eframe::Result {
@@ -49,6 +46,8 @@ pub enum ThreadResponse {
     SelectImagesLoadPreview(io::Result<ColorImage>),
     SelectImagesLoadImage(io::Result<ColorImage>),
     Convert(String, f64),
+    Converted(String),
+    Downsampled(String),
 }
 
 enum Tab {
@@ -69,13 +68,14 @@ struct MyApp {
 }
 
 impl MyApp {
-    fn new(frame: Context) -> Self {
+    fn new(context: Context) -> Self {
         let dir_name = "/Users/albert/projects/microcount-rs/src".into();
         let tp = ThreadPool::new(10, 10);
         let model = Rc::new(RefCell::new(Model::new(
             dir_name,
             tp.sender,
             tp.thread_sender,
+            context,
         )));
 
         Self {
@@ -86,6 +86,10 @@ impl MyApp {
             register_controller: RegisterController::new(Rc::clone(&model)),
             model,
         }
+    }
+
+    fn workspace_loaded(&self) -> bool {
+        self.model.borrow().workspace_loaded
     }
 }
 
@@ -103,10 +107,17 @@ impl eframe::App for MyApp {
                 }
                 ThreadResponse::Convert(im_id, progress) => {
                     let mut md = self.model.borrow_mut();
-                    md.workspace.as_mut().map(|ws| {
-                        let im_md = ws.images.get_mut(&im_id).unwrap();
-                        im_md.conversion_status = ConvertStatus::Converting(progress);
-                    });
+                    let im_md = md.workspace.raw_images.get_mut(&im_id).unwrap();
+                    im_md.state.conversion_status = ConvertStatus::Converting(progress);
+                }
+                ThreadResponse::Converted(im_id) => {
+                    let mut md = self.model.borrow_mut();
+                    let im_md = md.workspace.raw_images.get_mut(&im_id).unwrap();
+                    im_md.state.conversion_status = ConvertStatus::Converted;
+                }
+                ThreadResponse::Downsampled(im_id) => {
+                    let mut md = self.model.borrow_mut();
+                    let _ = md.raw_to_converted(im_id);
                 }
             }
         }
@@ -131,6 +142,10 @@ impl eframe::App for MyApp {
             });
 
             ui.separator();
+
+            if !self.workspace_loaded() {
+                return self.home_controller.render(ui);
+            }
 
             match self.selected_tab {
                 Tab::Home => self.home_controller.render(ui),

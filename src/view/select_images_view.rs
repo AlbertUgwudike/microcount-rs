@@ -11,7 +11,7 @@ pub fn ui_tab_select_images(con: &mut SelectImagesController, ui: &mut egui::Ui)
             con.add_images();
         }
         if ui.button("Remove Selected").clicked() {
-            con.add_images();
+            con.remove_images();
         }
         if ui.button("Convert Selected").clicked() {
             con.convert_and_downsample();
@@ -77,12 +77,19 @@ pub fn table_ui(con: &mut SelectImagesController, ui: &mut Ui) {
             });
         })
         .body(|body| {
-            let img_ids = con.img_ids();
+            let img_ids = con.raw_img_ids();
+            let con_ids = con.con_img_ids();
             let img_cons = con.img_cons();
-            body.rows(18.0, img_ids.len(), |mut row| {
+
+            body.rows(18.0, img_ids.len() + con_ids.len(), |mut row| {
                 let idx = row.index();
-                let img = img_ids.get(idx).unwrap();
-                let im_con = img_cons.get(idx).unwrap();
+
+                let img = img_ids
+                    .get(idx)
+                    .unwrap_or_else(|| con_ids.get(idx - img_ids.len()).unwrap());
+
+                let def = "Finished".to_string();
+                let im_con = img_cons.get(idx).unwrap_or(&def);
 
                 row.set_selected(con.selection_contains(img));
                 row.set_overline(true);
@@ -91,21 +98,27 @@ pub fn table_ui(con: &mut SelectImagesController, ui: &mut Ui) {
                     ui.label(img);
                 });
                 row.col(|ui| {
-                    let res = ui.text_edit_singleline(con.reg_buffer(img));
-                    if res.clicked_elsewhere() {
-                        con.persist()
+                    if idx >= img_ids.len() {
+                        let res = ui.text_edit_singleline(con.reg_buffer(img));
+                        if res.clicked_elsewhere() {
+                            con.persist()
+                        }
                     }
                 });
                 row.col(|ui| {
-                    let res = ui.text_edit_singleline(con.cell_buffer(img));
-                    if res.clicked_elsewhere() {
-                        con.persist()
+                    if idx >= img_ids.len() {
+                        let res = ui.text_edit_singleline(con.cell_buffer(img));
+                        if res.clicked_elsewhere() {
+                            con.persist()
+                        }
                     }
                 });
                 row.col(|ui| {
-                    let res = ui.text_edit_singleline(con.co_buffer(img));
-                    if res.clicked_elsewhere() {
-                        con.persist()
+                    if idx >= img_ids.len() {
+                        let res = ui.text_edit_singleline(con.co_buffer(img));
+                        if res.clicked_elsewhere() {
+                            con.persist()
+                        }
                     }
                 });
                 row.col(|ui| {
@@ -149,6 +162,8 @@ pub fn image_viewer(con: &mut SelectImagesController, ui: &mut Ui) {
                     bounding_box(con, ui);
                     inner_rect = ui.min_rect();
                 });
+
+            // scene.register_pan_and_zoom(ui, &mut response, &mut con.transform);
 
             con.state.preview_image_rect = tmp;
 

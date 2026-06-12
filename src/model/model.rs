@@ -1,19 +1,17 @@
 use eframe::egui::Context;
 use rfd::FileDialog;
-use std::cell::{Ref, RefCell};
 use std::future::Future;
 use std::io::{self, Error};
 use std::path::Path;
-use std::pin::{pin, Pin};
-use std::rc::Rc;
-use std::sync::Arc;
-use std::{collections::HashSet, fs};
+use std::pin::Pin;
+use std::{fs, sync::Arc};
 use tokio::sync::mpsc::Sender;
-use tokio::sync::Mutex;
 
-use crate::concurrency::ThreadPool;
-use crate::model::{constants, Atlas, ConvertStatus, ImageMetadata, Workspace};
-use crate::{ThreadLabel, ThreadResponse};
+use crate::model::image_metadata::{Converted, Raw, SourceFn};
+use crate::{
+    model::{Atlas, ImageMetadata, Workspace},
+    ThreadLabel, ThreadResponse,
+};
 
 type MSender = Sender<(
     Pin<Box<dyn Future<Output = ()> + Send + 'static>>,
@@ -24,70 +22,82 @@ type TSender = Arc<Sender<ThreadResponse>>;
 
 // #[derive(Debug)]
 pub struct Model {
-    pub workspace: Option<Workspace>,
+    pub workspace_loaded: bool,
+    pub workspace: Workspace,
     pub atlas: Atlas,
     pub sender: MSender,
     pub thread_sender: TSender,
+    pub context: Context,
 }
 
 impl Model {
-    pub fn new(app_dir: String, sender: MSender, thread_sender: TSender) -> Model {
+    pub fn new(
+        app_dir: String,
+        sender: MSender,
+        thread_sender: TSender,
+        context: Context,
+    ) -> Model {
         Model {
-            workspace: None,
+            workspace_loaded: false,
+            workspace: Workspace::default(),
             atlas: Atlas::new(app_dir).unwrap(),
             sender,
             thread_sender,
+            context,
         }
     }
 
     pub fn get_dir_name(&self) -> String {
-        self.workspace
-            .as_ref()
-            .map_or("".into(), |ws| ws.dir_name.clone())
+        self.workspace.dir_name.clone()
     }
 
     pub fn add_images(&mut self) -> Result<(), Error> {
         let file_option = FileDialog::new().set_directory("/").pick_files();
-        if let Some(ws) = &mut self.workspace {
-            match file_option {
-                Some(files) => {
-                    files.iter().for_each(|file| {
-                        let mut img = ImageMetadata::new(file.to_str().unwrap(), &ws.dir_name);
-                        // let res = img.set_metadata();
-                        // if res.is_ok() {
-                        ws.images.insert(img.id().to_string(), img);
-                        // }
-                    });
+        match file_option {
+            Some(files) => {
+                files.iter().for_each(|file| {
+                    let img = ImageMetadata::new(file.to_str().unwrap(), &self.workspace.dir_name);
+                    self.workspace.raw_images.insert(img.id(), img);
+                });
 
-                    self.save_workspace();
-                }
-                None => (),
-            };
+                self.save_workspace();
+            }
+            None => (),
+        };
+        Ok(())
+    }
+
+    pub fn is_converted(&self, im_id: &String) -> bool {
+        self.workspace.converted_images.contains_key(im_id)
+    }
+
+    pub fn raw_to_converted(&mut self, im_id: String) -> io::Result<()> {
+        if let Some(old_im) = self.workspace.raw_images.remove(&im_id) {
+            let new_im = old_im.set_metadata()?;
+            self.workspace.converted_images.insert(im_id, new_im);
         }
         Ok(())
     }
 
-    pub fn get_image(&self, im_id: &String) -> Option<&ImageMetadata> {
-        self.workspace
-            .as_ref()
-            .map(|ws| ws.images.get(im_id))
-            .flatten()
+    pub fn get_converted_image(&self, im_id: &String) -> Option<&ImageMetadata<Converted>> {
+        self.workspace.converted_images.get(im_id)
     }
 
-    pub fn with_images<R>(&self, f: impl FnOnce(Vec<&ImageMetadata>) -> R) {
-        if let Some(ws) = &self.workspace {
-            let images: Vec<&ImageMetadata> = ws.images.values().collect();
-            f(images);
-        }
+    pub fn get_raw_image(&self, im_id: &String) -> Option<&ImageMetadata<Raw>> {
+        self.workspace.raw_images.get(im_id)
+    }
+
+    pub fn with_converted_images<R>(&self, f: impl FnOnce(Vec<&ImageMetadata<Converted>>) -> R) {
+        let images: Vec<&ImageMetadata<Converted>> =
+            self.workspace.converted_images.values().collect();
+        f(images);
     }
 
     pub fn save_workspace(&self) {
-        self.workspace.as_ref().map(|ws| {
-            let dir_name = self.get_dir_name().clone();
-            let folder = Path::new(&dir_name);
-            let ws_s = serde_json::to_string(ws).unwrap();
-            fs::write(folder.join("ws.json"), ws_s).ok();
-        });
+        let dir_name = self.get_dir_name().clone();
+        let folder = Path::new(&dir_name);
+        let ws_s = serde_json::to_string(&self.workspace).unwrap();
+        fs::write(folder.join("ws.json"), ws_s).ok();
     }
 
     pub fn dispatch<F>(&self, repaint: bool, f: F)

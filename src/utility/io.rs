@@ -1,16 +1,16 @@
 use itertools::izip;
-use std::io;
+use std::{io, ops::Div};
 
 use crate::utility::{
-    imops::{array2buff, array2rgb_buff, stack_rgb, volume_to_matrix_vec},
-    types::{Matrix, TiffInfo, TiffType},
+    imops::{array2buff, array2rgb_buff, stack_rgb},
+    types::Matrix,
 };
 
 use eframe::egui;
 use itertools::Itertools;
 use ndarray::prelude::*;
 use ome_bioformats_rs::{
-    common::{Dim, Loc, PixelSlice},
+    common::Loc,
     format_in::{tiff_reader::TiffReader, FormatReader},
 };
 
@@ -65,7 +65,7 @@ pub async fn read_tiff_region_as(
                 tokio::task::yield_now().await;
             }
 
-            pxs_vec.push(data.unwrap())
+            pxs_vec.push(data.unwrap().to_u16vec())
         }
     } else {
         for c in 0..md.dimensions(0).unwrap().c {
@@ -78,18 +78,35 @@ pub async fn read_tiff_region_as(
                 tokio::task::yield_now().await;
             }
 
-            pxs_vec.push(data.unwrap())
+            pxs_vec.push(data.unwrap().to_u16vec())
+        }
+    }
+
+    if pxs_vec.len() < 3 {
+        println!("Not RGB!, Channel Count: {:?}", pxs_vec.len());
+        for _ in 0..(3 - pxs_vec.len()) {
+            pxs_vec.push(vec![0; pxs_vec[0].len()])
         }
     }
 
     let flat = izip!(
-        pxs_vec[0].to_u16vec(),
-        pxs_vec[1].to_u16vec(),
-        pxs_vec[2].to_u16vec()
+        pxs_vec[0].to_vec(),
+        pxs_vec[1].to_vec(),
+        pxs_vec[2].to_vec()
     )
     .map(|(a, b, c)| [a, b, c])
     .flatten()
-    .chunks(h.div_ceil(df) as usize * w.div_ceil(df) as usize);
+    .chunks(h.div(df) as usize * w.div_ceil(df) as usize);
+
+    println!(
+        "Pixels: {:?}",
+        (h.div(df) as usize, w.div_ceil(df) as usize)
+    );
+    println!("Pixels: {:?}", h.div(df) as usize * w.div_ceil(df) as usize);
+    println!(
+        "Pixels: {:?}",
+        pxs_vec.iter().map(|a| a.len()).collect::<Vec<usize>>()
+    );
 
     let mut out = vec![];
 
@@ -114,7 +131,7 @@ pub async fn egui_image_from_path(
         .collect();
 
     Ok(egui::ColorImage::from_rgb(
-        [w.div_ceil(df) as usize, h.div_ceil(df) as usize],
+        [w.div_ceil(df) as usize, h.div(df) as usize],
         &pixels,
     ))
 }

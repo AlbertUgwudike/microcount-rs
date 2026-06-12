@@ -1,10 +1,13 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use eframe::egui::{self, Color32, Context, Rect, TextureHandle, Ui, Vec2};
-use ome_bioformats_rs::convert::{format_converter::ConverterProgress, FormatConverter};
+use ome_bioformats_rs::tools::{FormatConverter, FormatDownsampler, Progress};
 
 use crate::{
-    model::{ConvertStatus, Model},
+    model::{
+        image_metadata::{ConvFn, DownFn, SourceFn},
+        Model,
+    },
     utility::io::egui_image_from_path,
     view::ui_tab_select_images,
     ThreadLabel, ThreadResponse,
@@ -59,50 +62,55 @@ impl SelectImagesController {
         let _ = self.model.borrow_mut().add_images();
     }
 
-    pub fn convert_and_downsample(&mut self) {
-        for idx in self.state.selection.clone() {
-            self.set_conversion_status(&idx, ConvertStatus::Converting(0.0));
-            self.convert(&idx);
+    pub fn remove_images(&self) {
+        let mut md = self.model.borrow_mut();
+        for im_id in &self.state.selection {
+            md.workspace.raw_images.remove(im_id);
+            md.workspace.converted_images.remove(im_id);
+            md.save_workspace();
         }
     }
 
-    fn convert(&mut self, im_id: &String) {
+    pub fn convert_and_downsample(&mut self) {
+        for idx in self.state.selection.clone() {
+            self.convert_and_downsample_img(&idx);
+        }
+    }
+
+    fn convert_and_downsample_img(&mut self, im_id: &String) {
         let md = self.model.borrow_mut();
-        let img = md.get_image(im_id).unwrap();
+        let img = md.get_raw_image(im_id).unwrap();
         let im_id = im_id.to_string();
-        let input = img.src_fn().into();
-        let output = img.conv_fn().into();
+        let input = img.src_fn().to_string();
+        let output_conv = img.conv_fn();
+        let output_down = img.down_fn();
         let t_sender = Arc::clone(&md.thread_sender);
+        let ctx = md.context.clone();
 
         md.dispatch(false, async move {
-            let mut converter = FormatConverter::new(input, output, 100).unwrap();
-
+            let mut converter = FormatConverter::new(&input, &output_conv, 100).unwrap();
             let mut progress = converter.step().unwrap();
-            while let ConverterProgress::Converting(a, b) = progress {
+            while let Progress::Running(a, b) = progress {
                 let percentage = 100.0 * a as f64 / b as f64;
-                let _ = t_sender.try_send(ThreadResponse::Convert(im_id.clone(), percentage));
+                ctx.request_repaint();
+                let _ = t_sender
+                    .send(ThreadResponse::Convert(im_id.clone(), percentage))
+                    .await;
                 progress = converter.step().unwrap();
             }
+
+            ctx.request_repaint();
+            let _ = t_sender
+                .send(ThreadResponse::Converted(im_id.clone()))
+                .await;
+
+            FormatDownsampler::downsample(&output_conv, &output_down, 25).unwrap();
+
+            ctx.request_repaint();
+            let _ = t_sender
+                .send(ThreadResponse::Downsampled(im_id.clone()))
+                .await;
         });
-    }
-
-    fn set_conversion_status(&self, im_id: &String, status: ConvertStatus) {
-        let mut md = self.model.borrow_mut();
-        md.workspace.as_mut().map(|ws| {
-            let im_md = ws.images.get_mut(im_id).unwrap();
-            im_md.conversion_status = status;
-        });
-    }
-
-    fn downsample(img: &String) {}
-
-    pub fn n_images(&self) -> usize {
-        self.model
-            .borrow()
-            .workspace
-            .as_ref()
-            .map(|ws| ws.images.len())
-            .unwrap_or(0)
     }
 
     pub fn selection_contains(&self, id: &str) -> bool {
@@ -119,29 +127,29 @@ impl SelectImagesController {
 
     pub fn reg_buffer(&mut self, im_id: &String) -> &mut String {
         let md = self.model.borrow();
-        let im_md = md.get_image(im_id).unwrap();
+        let im_md = md.get_converted_image(im_id).unwrap();
         self.state
             .reg_hm
             .entry(im_id.clone())
-            .or_insert(im_md.registration_channel.to_string())
+            .or_insert(im_md.state.registration_channel.to_string())
     }
 
     pub fn co_buffer(&mut self, im_id: &String) -> &mut String {
         let md = self.model.borrow();
-        let im_md = md.get_image(im_id).unwrap();
+        let im_md = md.get_converted_image(im_id).unwrap();
         self.state
             .co_hm
             .entry(im_id.clone())
-            .or_insert(im_md.comarker_channel.to_string())
+            .or_insert(im_md.state.comarker_channel.to_string())
     }
 
     pub fn cell_buffer(&mut self, im_id: &String) -> &mut String {
         let md = self.model.borrow();
-        let im_md = md.get_image(im_id).unwrap();
+        let im_md = md.get_converted_image(im_id).unwrap();
         self.state
             .cell_hm
             .entry(im_id.clone())
-            .or_insert(im_md.cell_channel.to_string())
+            .or_insert(im_md.state.cell_channel.to_string())
     }
 
     pub fn persist(&mut self) {
@@ -157,30 +165,24 @@ impl SelectImagesController {
     fn persist_cell_channel_hm(&self) {
         let mut model = self.model.borrow_mut();
         for (im_id, s) in self.state.cell_hm.iter() {
-            model.workspace.as_mut().map(|ws| {
-                let im_md = ws.images.get_mut(im_id).unwrap();
-                im_md.update_cell_channel(s.to_string());
-            });
+            let im_md = model.workspace.converted_images.get_mut(im_id).unwrap();
+            im_md.update_cell_channel(s.to_string());
         }
     }
 
     fn persist_co_channel_hm(&self) {
         let mut model = self.model.borrow_mut();
         for (im_id, s) in self.state.co_hm.iter() {
-            model.workspace.as_mut().map(|ws| {
-                let im_md = ws.images.get_mut(im_id).unwrap();
-                im_md.update_comarker_channel(s.to_string());
-            });
+            let im_md = model.workspace.converted_images.get_mut(im_id).unwrap();
+            im_md.update_comarker_channel(s.to_string());
         }
     }
 
     fn persist_reg_channel_hm(&self) {
         let mut model = self.model.borrow_mut();
         for (im_id, s) in self.state.reg_hm.iter() {
-            model.workspace.as_mut().map(|ws| {
-                let im_md = ws.images.get_mut(im_id).unwrap();
-                im_md.update_reg_channel(s.to_string());
-            });
+            let im_md = model.workspace.converted_images.get_mut(im_id).unwrap();
+            im_md.update_reg_channel(s.to_string());
         }
     }
 
@@ -192,27 +194,31 @@ impl SelectImagesController {
         &mut self.state.image_rect
     }
 
-    pub fn img_ids(&self) -> Vec<String> {
-        self.model
-            .borrow()
-            .workspace
-            .as_ref()
-            .map(|ws| ws.images.values().map(|i| i.id().to_string()).collect())
-            .unwrap_or(vec![])
+    pub fn raw_img_ids(&self) -> Vec<String> {
+        let md = self.model.borrow();
+        md.workspace
+            .raw_images
+            .values()
+            .map(|i| i.id())
+            .collect::<Vec<String>>()
+    }
+
+    pub fn con_img_ids(&self) -> Vec<String> {
+        let md = self.model.borrow();
+        md.workspace
+            .converted_images
+            .values()
+            .map(|i| i.id())
+            .collect()
     }
 
     pub fn img_cons(&self) -> Vec<String> {
-        self.model
-            .borrow()
-            .workspace
-            .as_ref()
-            .map(|ws| {
-                ws.images
-                    .values()
-                    .map(|i| i.conversion_status.to_str().into())
-                    .collect()
-            })
-            .unwrap_or(vec![])
+        let md = self.model.borrow();
+        md.workspace
+            .raw_images
+            .values()
+            .map(|i| i.state.conversion_status.to_str().to_string())
+            .collect::<Vec<String>>()
     }
 
     pub fn on_image_selected(&mut self, im_id: &String, ctx: &Context) {
@@ -220,16 +226,23 @@ impl SelectImagesController {
         self.state.selected_img = Some(im_id.clone());
 
         let md = self.model.borrow();
-        let im_md = md.get_image(im_id).unwrap();
-        let hw = ((im_md.size.1 - 1) as u64, (im_md.size.0 - 1) as u64);
-        let src_fn = im_md.src_fn().to_owned();
+        if !md.is_converted(im_id) {
+            return;
+        }
+
+        let im_md = md.get_converted_image(im_id).unwrap();
+        let hw = (
+            (im_md.state.down_size.1 - 1) as u64,
+            (im_md.state.down_size.0 - 1) as u64,
+        );
+        let src_fn = im_md.down_fn().to_owned();
         let ctx = ctx.clone();
         let ttx = Arc::clone(&md.thread_sender);
 
         md.dispatch_exclusive(ThreadLabel::SelectImagesLoadPreview, true, async move {
             println!("Dispatch!");
             println!("({}, {})", hw.0, hw.1);
-            let im = egui_image_from_path(src_fn, (0, 0), hw, 25).await;
+            let im = egui_image_from_path(src_fn, (0, 0), hw, 1).await;
             ctx.request_repaint();
             ttx.send(ThreadResponse::SelectImagesLoadPreview(im)).await;
         });
@@ -245,8 +258,8 @@ impl SelectImagesController {
         self.set_data_place_holder(&ctx);
 
         let md = self.model.borrow();
-        let im_md = md.get_image(im_id).unwrap();
-        let src_fn = im_md.src_fn().to_owned();
+        let im_md = md.get_converted_image(im_id).unwrap();
+        let src_fn = im_md.conv_fn().to_owned();
         let ctx = ctx.clone();
         let ttx = Arc::clone(&md.thread_sender);
 

@@ -1,13 +1,9 @@
 use std::ops::Div;
 
-use eframe::egui::{
-    self, Color32, Pos2, Rect, Response, Scene, Sense, Shape, Stroke, TextureHandle, Ui, Vec2,
-};
+use eframe::egui::{self, Color32, Pos2, Rect, Scene, Sense, Shape, Stroke, Ui, Vec2};
 
 use crate::controller::RegisterController;
 use crate::model::Model;
-use crate::utility::imops::egui_image_from_mat;
-use crate::utility::io::egui_image_from_path;
 
 pub fn ui_tab_register(con: &mut RegisterController, ui: &mut egui::Ui, model: &Model) {
     ui.vertical(|ui| {
@@ -177,22 +173,22 @@ fn table_ui(con: &mut RegisterController, ui: &mut egui::Ui, model: &Model) {
             });
         })
         .body(|body| {
-            model.with_images(|img_ids| {
+            model.with_converted_images(|img_ids| {
                 body.rows(18.0, img_ids.len(), |mut row| {
                     let idx = row.index();
                     let img = &img_ids[idx];
 
-                    row.set_selected(con.selection.contains(img.src_fn()));
+                    row.set_selected(con.selection.contains(&img.src_fn()));
                     row.set_overline(true);
 
                     row.col(|ui| {
                         ui.label(img.src_fn());
                     });
                     row.col(|ui| {
-                        ui.label(img.registration_channel.to_string());
+                        ui.label(img.state.registration_channel.to_string());
                     });
                     row.col(|ui| {
-                        ui.label(img.cell_channel.to_string());
+                        ui.label(img.state.cell_channel.to_string());
                     });
 
                     let mut modifier = false;

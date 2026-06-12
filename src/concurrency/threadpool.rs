@@ -55,7 +55,10 @@ impl<T: Send + 'static + Eq + Hash + Copy + Debug, K: Send + 'static> ThreadPool
                             }
                         });
                     } else {
-                        job.await;
+                        tokio::spawn(async move {
+                            let _ = permit.acquire().await.unwrap();
+                            job.await;
+                        });
                     }
                 }
             }

@@ -1,18 +1,16 @@
 use std::{
-    cell::{Ref, RefCell},
-    collections::HashMap,
+    cell::RefCell,
     fs,
     io::{self, Error},
     path::Path,
     rc::Rc,
-    sync::Arc,
 };
 
 use eframe::egui::Ui;
 use rfd::FileDialog;
 
 use crate::{
-    model::{constants, ImageMetadata, Model, Workspace},
+    model::{constants, Model, Workspace},
     view::ui_tab_home,
 };
 
@@ -57,7 +55,9 @@ impl HomeController {
             Err(err) => return Err(Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
         };
 
-        self.model.borrow_mut().workspace = Some(ws);
+        let mut md = self.model.borrow_mut();
+        md.workspace = ws;
+        md.workspace_loaded = true;
 
         Ok(())
     }
