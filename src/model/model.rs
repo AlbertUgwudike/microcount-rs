@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::{fs, sync::Arc};
 use tokio::sync::mpsc::Sender;
 
-use crate::model::image_metadata::{Converted, Raw, SourceFn};
+use crate::model::image_metadata::{Converted, Raw, Registered, SourceFn, Unregistered};
 use crate::{
     model::{Atlas, ImageMetadata, Workspace},
     ThreadLabel, ThreadResponse,
@@ -71,6 +71,10 @@ impl Model {
         self.workspace.converted_images.contains_key(im_id)
     }
 
+    pub fn is_registered(&self, im_id: &String) -> bool {
+        self.workspace.registered_images.contains_key(im_id)
+    }
+
     pub fn raw_to_converted(&mut self, im_id: String) -> io::Result<()> {
         if let Some(old_im) = self.workspace.raw_images.remove(&im_id) {
             let new_im = old_im.set_metadata()?;
@@ -79,18 +83,22 @@ impl Model {
         Ok(())
     }
 
-    pub fn get_converted_image(&self, im_id: &String) -> Option<&ImageMetadata<Converted>> {
+    pub fn get_converted_image(
+        &self,
+        im_id: &String,
+    ) -> Option<&ImageMetadata<Converted<Unregistered>>> {
         self.workspace.converted_images.get(im_id)
+    }
+
+    pub fn get_registered_image(
+        &self,
+        im_id: &String,
+    ) -> Option<&ImageMetadata<Converted<Registered>>> {
+        self.workspace.registered_images.get(im_id)
     }
 
     pub fn get_raw_image(&self, im_id: &String) -> Option<&ImageMetadata<Raw>> {
         self.workspace.raw_images.get(im_id)
-    }
-
-    pub fn with_converted_images<R>(&self, f: impl FnOnce(Vec<&ImageMetadata<Converted>>) -> R) {
-        let images: Vec<&ImageMetadata<Converted>> =
-            self.workspace.converted_images.values().collect();
-        f(images);
     }
 
     pub fn save_workspace(&self) {

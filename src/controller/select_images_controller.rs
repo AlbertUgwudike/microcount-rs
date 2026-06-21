@@ -231,10 +231,9 @@ impl SelectImagesController {
         }
 
         let im_md = md.get_converted_image(im_id).unwrap();
-        let hw = (
-            (im_md.state.down_size.1 - 1) as u64,
-            (im_md.state.down_size.0 - 1) as u64,
-        );
+        let hw = im_md.down_size();
+        let hw = ((hw.0 - 1) as u64, (hw.1 - 1) as u64);
+        let dir = im_md.state.direction;
         let src_fn = im_md.down_fn().to_owned();
         let ctx = ctx.clone();
         let ttx = Arc::clone(&md.thread_sender);
@@ -242,7 +241,7 @@ impl SelectImagesController {
         md.dispatch_exclusive(ThreadLabel::SelectImagesLoadPreview, true, async move {
             println!("Dispatch!");
             println!("({}, {})", hw.0, hw.1);
-            let im = egui_image_from_path(src_fn, (0, 0), hw, 1).await;
+            let im = egui_image_from_path(src_fn, (0, 0), hw, hw, 1, &dir).await;
             ctx.request_repaint();
             ttx.send(ThreadResponse::SelectImagesLoadPreview(im)).await;
         });
@@ -259,6 +258,9 @@ impl SelectImagesController {
 
         let md = self.model.borrow();
         let im_md = md.get_converted_image(im_id).unwrap();
+        let ihw = im_md.size();
+        let ihw = ((ihw.0 - 1) as u64, (ihw.1 - 1) as u64);
+        let dir = im_md.state.direction;
         let src_fn = im_md.conv_fn().to_owned();
         let ctx = ctx.clone();
         let ttx = Arc::clone(&md.thread_sender);
@@ -267,7 +269,7 @@ impl SelectImagesController {
             ThreadLabel::SelectImagesLoadImage,
             true,
             async move {
-                let im = egui_image_from_path(src_fn, origin, hw, 1).await;
+                let im = egui_image_from_path(src_fn, origin, hw, ihw, 1, &dir).await;
                 ctx.request_repaint();
                 ttx.send(ThreadResponse::SelectImagesLoadImage(im)).await;
             },

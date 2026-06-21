@@ -40,6 +40,7 @@ async fn main() -> eframe::Result {
 pub enum ThreadLabel {
     SelectImagesLoadPreview,
     SelectImagesLoadImage,
+    RegisterLoadPreview,
 }
 
 pub enum ThreadResponse {
@@ -48,6 +49,7 @@ pub enum ThreadResponse {
     Convert(String, f64),
     Converted(String),
     Downsampled(String),
+    RegisterLoadPreview(io::Result<ColorImage>),
 }
 
 enum Tab {
@@ -118,6 +120,10 @@ impl eframe::App for MyApp {
                 ThreadResponse::Downsampled(im_id) => {
                     let mut md = self.model.borrow_mut();
                     let _ = md.raw_to_converted(im_id);
+                }
+                ThreadResponse::RegisterLoadPreview(res) => {
+                    let h = ctx.load_texture("screenshot_demo", res.unwrap(), Default::default());
+                    self.register_controller.image_data = Some(h)
                 }
             }
         }

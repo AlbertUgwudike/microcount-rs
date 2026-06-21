@@ -163,8 +163,6 @@ pub fn image_viewer(con: &mut SelectImagesController, ui: &mut Ui) {
                     inner_rect = ui.min_rect();
                 });
 
-            // scene.register_pan_and_zoom(ui, &mut response, &mut con.transform);
-
             con.state.preview_image_rect = tmp;
 
             if scene.response.double_clicked() {
@@ -242,7 +240,7 @@ pub fn bounding_box(con: &mut SelectImagesController, ui: &mut Ui) {
     if r_res.double_clicked() {
         let scaled_offset = con.state.pos_offset * 25.0;
         let scaled_sz_offset = con.state.sz_offset * 25.0;
-        let origin = (scaled_offset.x as u64, scaled_offset.y as u64);
+        let origin = (scaled_offset.y as u64, scaled_offset.x as u64); // <-- convert to (r, c)
         let hw = (scaled_sz_offset.y as u64, scaled_sz_offset.x as u64);
         let im_id = con.state.selected_img.clone().unwrap(); //<---
         con.on_subregion_selected(&im_id, hw, origin, ui.ctx());

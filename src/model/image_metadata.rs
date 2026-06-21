@@ -3,7 +3,9 @@ use std::{io, ops::Div, path::Path};
 use ome_bioformats_rs::format_in::{tiff_reader::TiffReader, FormatReader};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{constants::DIR_DOWN, DIR_CONVERT};
+use crate::model::{
+    constants::DIR_DOWN, transformation::Direction, Region, Transformation, DIR_CONVERT,
+};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Raw {
@@ -11,14 +13,40 @@ pub struct Raw {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Converted {
-    pub size: (usize, usize),
-    pub down_size: (usize, usize),
+pub struct Converted<S> {
+    size: (usize, usize),
+    down_size: (usize, usize),
+    pub direction: Direction,
 
     pub channel_count: usize,
     pub registration_channel: usize,
     pub cell_channel: usize,
     pub comarker_channel: usize,
+
+    pub registration_status: S,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Unregistered {}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum Registered {
+    Affine {
+        transformation: Transformation,
+        regions: Vec<Region>,
+    },
+    WholeImage {
+        region: Region,
+    },
+}
+
+impl Registered {
+    pub fn to_str(&self) -> String {
+        match self {
+            Self::Affine { .. } => "Affine".into(),
+            Self::WholeImage { .. } => "Whole Image".into(),
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -62,13 +90,13 @@ impl ImageMetadata<Raw> {
         }
     }
 
-    pub fn set_metadata(self) -> io::Result<ImageMetadata<Converted>> {
+    pub fn set_metadata(self) -> io::Result<ImageMetadata<Converted<Unregistered>>> {
         let conv_fn = self.conv_fn();
         TiffReader::new(conv_fn.into()).map(|im| {
             let md = im.metadata();
             let dim_zero = md.dimensions(0).unwrap();
-            let size = (dim_zero.w as usize, dim_zero.h as usize);
-            let down_size = (size.0.div_ceil(25), size.1.div(25));
+            let size = (dim_zero.h as usize, dim_zero.w as usize);
+            let down_size = (size.0.div(25), size.1.div_ceil(25));
             let channel_count = if md.series_count() > 0 {
                 md.series_count()
             } else {
@@ -85,17 +113,19 @@ impl ImageMetadata<Raw> {
                 state: Converted {
                     size,
                     down_size,
+                    direction: Direction::North,
                     channel_count,
                     registration_channel,
                     cell_channel,
                     comarker_channel,
+                    registration_status: Unregistered {},
                 },
             }
         })
     }
 }
 
-impl ImageMetadata<Converted> {
+impl<T> ImageMetadata<Converted<T>> {
     pub fn update_cell_channel(&mut self, v: String) {
         let _ = str::parse::<usize>(&v).map(|v| {
             if v < self.state.channel_count {
@@ -118,6 +148,34 @@ impl ImageMetadata<Converted> {
                 self.state.registration_channel = v
             }
         });
+    }
+
+    pub fn rotate(&mut self) {
+        self.state.direction = self.state.direction.rotate()
+    }
+
+    pub fn size(&self) -> (usize, usize) {
+        match self.state.direction {
+            Direction::North | Direction::South => self.state.size,
+            Direction::East | Direction::West => (self.state.size.1, self.state.size.0),
+        }
+    }
+
+    pub fn raw_size(&self) -> (usize, usize) {
+        self.state.size
+    }
+
+    pub fn down_size(&self) -> (usize, usize) {
+        match self.state.direction {
+            Direction::North | Direction::South => self.state.down_size,
+            Direction::East | Direction::West => (self.state.down_size.1, self.state.down_size.0),
+        }
+    }
+}
+
+impl ImageMetadata<Converted<Registered>> {
+    pub fn registration_status(&self) -> &Registered {
+        &self.state.registration_status
     }
 }
 
@@ -150,7 +208,7 @@ pub trait ConvFn: SourceFn {
 }
 
 impl ConvFn for ImageMetadata<Raw> {}
-impl ConvFn for ImageMetadata<Converted> {}
+impl<T> ConvFn for ImageMetadata<Converted<T>> {}
 
 pub trait DownFn: SourceFn {
     fn down_fn(&self) -> String {
@@ -159,4 +217,4 @@ pub trait DownFn: SourceFn {
 }
 
 impl DownFn for ImageMetadata<Raw> {}
-impl DownFn for ImageMetadata<Converted> {}
+impl<T> DownFn for ImageMetadata<Converted<T>> {}

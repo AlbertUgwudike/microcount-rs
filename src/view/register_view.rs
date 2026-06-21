@@ -1,30 +1,39 @@
 use std::ops::Div;
 
-use eframe::egui::{self, Color32, Pos2, Rect, Scene, Sense, Shape, Stroke, Ui, Vec2};
+use eframe::egui::{self, Color32, Pos2, Rect, Scene, Sense, Shape, Stroke, Style, Ui, Vec2};
 
 use crate::controller::RegisterController;
 use crate::model::Model;
 
-pub fn ui_tab_register(con: &mut RegisterController, ui: &mut egui::Ui, model: &Model) {
+pub fn ui_tab_register(con: &mut RegisterController, ui: &mut egui::Ui) {
     ui.vertical(|ui| {
-        table_ui(con, ui, model);
+        table_ui(con, ui);
 
         ui.separator();
 
-        if ui.button("Register").clicked() {
-            con.register_button_pushed();
-        }
+        ui.horizontal(|ui| {
+            if ui.button("Register").clicked() {
+                con.register_button_pushed();
+            }
+
+            if ui.button("Rotate").clicked() {
+                if let Some(im_id) = &con.selected_img.clone() {
+                    con.rotate_image(im_id);
+                    con.on_image_selected(im_id, ui.ctx());
+                }
+            }
+        });
 
         ui.separator();
 
-        image_viewer(con, ui, model);
+        image_viewer(con, ui);
     });
 }
 
 fn black_box(ui: &mut Ui, name: &str, add_contents: impl FnOnce(&mut Ui) -> ()) {
     egui::containers::Window::new(name.to_string())
         .current_pos(ui.max_rect().min)
-        .max_size(ui.available_size())
+        .max_size(ui.max_rect().size())
         .min_size(ui.available_size())
         .interactable(false)
         .title_bar(false)
@@ -37,68 +46,85 @@ fn black_box(ui: &mut Ui, name: &str, add_contents: impl FnOnce(&mut Ui) -> ()) 
         .show(ui.ctx(), add_contents);
 }
 
-fn image_viewer(con: &mut RegisterController, ui: &mut egui::Ui, model: &Model) {
+fn image_viewer(con: &mut RegisterController, ui: &mut egui::Ui) {
     ui.columns(2, |ui| {
         black_box(&mut ui[0], "left", |ui| {
             ui.vertical(|ui| {
-                let toggle_ori_button = ui.button("Orientation");
+                ui.set_max_size(ui.available_size_before_wrap() - Vec2::new(0., 30.));
 
-                if toggle_ori_button.clicked() {
-                    con.toggle_atlas_orientation();
-                    con.on_atlas_interact(model, &toggle_ori_button.ctx);
-                }
+                ui.add_space(10.);
+
+                ui.horizontal(|ui| {
+                    ui.add_space(10.);
+
+                    let toggle_ori_button = ui.button("Orientation");
+
+                    if toggle_ori_button.clicked() {
+                        con.toggle_atlas_orientation();
+                        con.on_atlas_interact(&toggle_ori_button.ctx);
+                    }
+
+                    let _ = ui.button("Yeetak");
+                });
 
                 let mut inner_rect = Rect::NAN;
+                let mut tmp = con.scene_rect2;
 
-                let f = |ui: &mut Ui| {
+                let scene = Scene::new().zoom_range(0.0..=f32::INFINITY);
+                let mut r = scene.show(ui, &mut tmp, |ui: &mut Ui| {
                     if let Some(im) = &con.image_data2 {
                         ui.image(im);
                     }
 
                     inner_rect = ui.min_rect();
                     draw_hex(&mut con.atlas_hex, con.transform.scaling, ui);
-                };
+                });
 
-                let scene = Scene::new().zoom_range(0.0..=f32::INFINITY);
+                con.scene_rect2 = tmp;
 
-                let mut response = scene.show(ui, &mut con.scene_rect2, f).response;
+                scene.register_pan_and_zoom(ui, &mut r.response, &mut con.transform);
 
-                scene.register_pan_and_zoom(ui, &mut response, &mut con.transform);
-
-                if response.double_clicked() {
+                if r.response.double_clicked() {
                     con.scene_rect2 = inner_rect;
                 }
 
-                let n_slices = model.atlas.n_slices(con.atlas_orientation);
+                ui.horizontal(|ui| {
+                    ui.add_space(10.);
+                    ui.spacing_mut().slider_width = ui.available_width() - 70.;
 
-                let slider = egui::Slider::new(&mut con.slider_pos, 0..=(n_slices - 1));
-                let slider = ui.add(slider).interact(Sense::click_and_drag());
+                    let n_slices = con.n_atlas_slices(con.atlas_orientation);
+                    let slider = egui::Slider::new(&mut con.slider_pos, 0..=(n_slices - 1));
+                    let slider = ui.add(slider).interact(Sense::click_and_drag());
 
-                if slider.dragged() {
-                    con.on_atlas_interact(model, &slider.ctx);
-                }
+                    if slider.dragged() {
+                        con.on_atlas_interact(&slider.ctx);
+                    }
+                });
+
+                ui.add_space(10.);
             });
         });
 
         black_box(&mut ui[1], "right", |ui| {
             let mut inner_rect = Rect::NAN;
+            let mut tmp = con.scene_rect;
 
-            let f = |ui: &mut Ui| {
+            let scene = Scene::new().zoom_range(0.0..=f32::INFINITY);
+
+            let mut r = scene.show(ui, &mut tmp, |ui: &mut Ui| {
                 if let Some(im) = &con.image_data {
                     ui.image(im);
                     let dim = (*im.size().iter().max().unwrap() as f32) / 250.0;
                     draw_hex(&mut con.hist_hex, con.transform2.scaling / dim, ui);
                 }
                 inner_rect = ui.min_rect();
-            };
+            });
 
-            let scene = Scene::new().zoom_range(0.0..=f32::INFINITY);
+            con.scene_rect = tmp;
 
-            let mut response = scene.show(ui, &mut con.scene_rect, f).response;
+            scene.register_pan_and_zoom(ui, &mut r.response, &mut con.transform2);
 
-            scene.register_pan_and_zoom(ui, &mut response, &mut con.transform2);
-
-            if response.double_clicked() {
+            if r.response.double_clicked() {
                 con.scene_rect = inner_rect;
             }
         });
@@ -137,13 +163,12 @@ fn draw_hex(pos: &mut [(f32, f32); 6], scale: f32, ui: &mut egui::Ui) {
     }
 }
 
-fn table_ui(con: &mut RegisterController, ui: &mut egui::Ui, model: &Model) {
+fn table_ui(con: &mut RegisterController, ui: &mut egui::Ui) {
     use egui_extras::{Column, TableBuilder};
 
     let available_height = ui.available_height();
     let mut table = TableBuilder::new(ui)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(Column::remainder())
         .column(Column::remainder())
         .column(Column::remainder())
         .auto_shrink(false)
@@ -166,52 +191,47 @@ fn table_ui(con: &mut RegisterController, ui: &mut egui::Ui, model: &Model) {
                 );
             });
             header.col(|ui| {
-                ui.strong("Atlas Registered");
-            });
-            header.col(|ui| {
-                ui.strong("Whole Registered");
+                ui.strong("Registeration Status");
             });
         })
         .body(|body| {
-            model.with_converted_images(|img_ids| {
-                body.rows(18.0, img_ids.len(), |mut row| {
-                    let idx = row.index();
-                    let img = &img_ids[idx];
+            let img_ids = con.img_ids();
+            let reg_statuses = con.reg_statuses();
+            body.rows(18.0, img_ids.len(), |mut row| {
+                let idx = row.index();
+                let id = &img_ids[idx];
+                let rs = &reg_statuses[idx];
 
-                    row.set_selected(con.selection.contains(&img.src_fn()));
-                    row.set_overline(true);
+                row.set_selected(con.selection.contains(id));
+                row.set_overline(true);
 
-                    row.col(|ui| {
-                        ui.label(img.src_fn());
-                    });
-                    row.col(|ui| {
-                        ui.label(img.state.registration_channel.to_string());
-                    });
-                    row.col(|ui| {
-                        ui.label(img.state.cell_channel.to_string());
-                    });
+                row.col(|ui| {
+                    ui.label(id);
+                });
+                row.col(|ui| {
+                    ui.label(rs);
+                });
 
-                    let mut modifier = false;
-                    let mut clicked = false;
+                let mut modifier = false;
+                let mut clicked = false;
 
-                    if row.response().clicked() {
-                        clicked = true
-                    }
+                if row.response().clicked() {
+                    clicked = true
+                }
 
-                    row.response().ctx.input(|i| {
-                        if i.key_down(egui::Key::Space) {
-                            modifier = true;
-                        }
-                    });
-
-                    if modifier && clicked {
-                        con.toggle_selection(img, &row.response().ctx);
-                    } else if clicked {
-                        con.unselect_all();
-                        con.toggle_selection(img, &row.response().ctx);
-                        con.on_image_selected(img, &row.response().ctx);
+                row.response().ctx.input(|i| {
+                    if i.key_down(egui::Key::Space) {
+                        modifier = true;
                     }
                 });
+
+                if modifier && clicked {
+                    con.toggle_selection(id);
+                } else if clicked {
+                    con.unselect_all();
+                    con.toggle_selection(id);
+                    con.on_image_selected(id, &row.response().ctx);
+                }
             });
         });
 }

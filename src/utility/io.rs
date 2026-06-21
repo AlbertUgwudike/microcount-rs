@@ -1,12 +1,15 @@
 use itertools::izip;
 use std::{io, ops::Div};
 
-use crate::utility::{
-    imops::{array2buff, array2rgb_buff, stack_rgb},
-    types::Matrix,
+use crate::{
+    model::transformation::Direction,
+    utility::{
+        imops::{array2buff, array2rgb_buff, stack_rgb},
+        types::Matrix,
+    },
 };
 
-use eframe::egui;
+use eframe::egui::{self};
 use itertools::Itertools;
 use ndarray::prelude::*;
 use ome_bioformats_rs::{
@@ -121,19 +124,82 @@ pub async fn egui_image_from_path(
     path: String,
     origin: (u64, u64),
     (h, w): (u64, u64),
+    (ih, iw): (u64, u64),
     df: u64,
+    direction: &Direction,
 ) -> io::Result<egui::ColorImage> {
-    let pixels: Vec<u8> = read_tiff_region_as(&path, origin, (h, w), df)
+    let t_origin = transform_origin(origin, (h, w), (ih, iw), direction);
+
+    let (t_h, t_w) = match direction {
+        Direction::North | Direction::South => (h, w),
+        Direction::East | Direction::West => (w, h),
+    };
+
+    let pixels: Vec<u8> = read_tiff_region_as(&path, (t_origin.1, t_origin.0), (t_h, t_w), df)
         .await?
         .into_iter()
         .flatten()
         .map(|p| std::cmp::min(255, p) as u8)
         .collect();
 
-    Ok(egui::ColorImage::from_rgb(
-        [w.div_ceil(df) as usize, h.div(df) as usize],
-        &pixels,
-    ))
+    let chunks = pixels
+        .chunks_exact(3)
+        .into_iter()
+        .map(|v| [v[0], v[1], v[2]])
+        .collect();
+
+    let pixels: Vec<u8> = rotate_image(&chunks, (t_h, t_w), direction)
+        .into_iter()
+        .flatten()
+        .collect();
+
+    let (w, h) = (w.div_ceil(df) as usize, h.div(df) as usize);
+
+    Ok(egui::ColorImage::from_rgb([w, h], &pixels))
+}
+
+fn transform_origin(
+    (r, c): (u64, u64),
+    (h, w): (u64, u64),
+    (ih, iw): (u64, u64),
+    direction: &Direction, // feature of input
+) -> (u64, u64) {
+    let ori = match direction {
+        Direction::North => (r, c),
+        Direction::East => (r, c + w - 1),
+        Direction::South => (r + h - 1, c + w - 1),
+        Direction::West => (r + h - 1, c),
+    };
+    rotate_coord(ori, (ih, iw), &direction.reciprocal())
+}
+
+fn rotate_image<'a>(img: &Vec<[u8; 3]>, (h, w): (u64, u64), direction: &Direction) -> Vec<[u8; 3]> {
+    let mut out = vec![[0, 0, 0]; (h * w) as usize];
+
+    let m = match direction {
+        Direction::North | Direction::South => w,
+        Direction::East | Direction::West => h,
+    };
+
+    for r in 0..h {
+        for c in 0..w {
+            let (i, j) = rotate_coord((r, c), (h, w), direction);
+            let dest = (i * m + j) as usize;
+            let orig = (r * w + c) as usize;
+            out[dest] = img[orig];
+        }
+    }
+
+    out
+}
+
+fn rotate_coord((r, c): (u64, u64), (h, w): (u64, u64), direction: &Direction) -> (u64, u64) {
+    match direction {
+        Direction::North => (r, c),
+        Direction::East => (c, h - r - 1),
+        Direction::South => (h - r - 1, w - c - 1),
+        Direction::West => (w - c - 1, r),
+    }
 }
 
 pub fn save_as_luma8(arr: &Matrix<u32>, file_name: &str) {

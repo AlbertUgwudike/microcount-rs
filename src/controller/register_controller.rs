@@ -1,14 +1,24 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Ref, RefCell},
+    rc::Rc,
+    sync::Arc,
+};
 
 use eframe::{
-    egui::{Context, Rect, TextureHandle, Ui, Vec2},
+    egui::{self, Color32, Context, Rect, TextureHandle, Ui, Vec2},
     emath::TSTransform,
 };
 
 use crate::{
-    model::{atlas::Orientation, image_metadata::Converted, ImageMetadata, Model},
+    model::{
+        atlas::Orientation,
+        image_metadata::{Converted, DownFn, SourceFn},
+        transformation::Direction,
+        ImageMetadata, Model,
+    },
     utility::{imops::egui_image_from_mat, io::egui_image_from_path},
     view::register_view,
+    ThreadLabel, ThreadResponse,
 };
 
 pub struct RegisterController {
@@ -66,28 +76,59 @@ impl RegisterController {
         }
     }
 
-    pub fn toggle_selection(&mut self, im_md: &ImageMetadata<Converted>, ctx: &Context) {
-        if self.selection.contains(&im_md.src_fn()) {
-            self.selection.remove(&im_md.src_fn());
+    pub fn toggle_selection(&mut self, im_md: &String) {
+        if self.selection.contains(im_md) {
+            self.selection.remove(im_md);
         } else {
-            self.selection.insert(im_md.src_fn().to_string());
+            self.selection.insert(im_md.to_string());
         }
     }
 
-    pub fn on_image_selected(&mut self, im_md: &ImageMetadata<Converted>, ctx: &Context) {
-        self.selected_img = Some(im_md.src_fn().to_string());
-        let hw = (
-            (im_md.state.size.1 - 1) as u64,
-            (im_md.state.size.0 - 1) as u64,
-        );
-        tokio::task::block_in_place(async || {
-            egui_image_from_path(im_md.src_fn().into(), (0, 0), hw, 25)
-                .await
-                .map(|im| {
-                    let h = ctx.load_texture("screenshot_demo", im, Default::default());
-                    self.image_data = Some(h);
-                });
+    pub fn on_image_selected(&mut self, im_id: &String, ctx: &Context) {
+        self.selected_img = Some(im_id.clone());
+        self.set_place_holder(&ctx);
+        let md = self.model.borrow();
+        if md.is_converted(im_id) {
+            let im_md = md.get_converted_image(im_id).unwrap();
+            let hw = im_md.down_size();
+            let hw = ((hw.0 - 1) as u64, (hw.1 - 1) as u64);
+            let dir = im_md.state.direction;
+            let down_fn = im_md.down_fn().to_owned();
+            RegisterController::load_img(md, down_fn, hw, hw, dir, &ctx);
+        } else if md.is_registered(im_id) {
+            let im_md = md.get_registered_image(im_id).unwrap();
+            let hw = im_md.down_size();
+            let hw = ((hw.0 - 1) as u64, (hw.1 - 1) as u64);
+            let dir = im_md.state.direction;
+            let down_fn = im_md.down_fn().to_owned();
+            RegisterController::load_img(md, down_fn, hw, hw, dir, &ctx);
+        }
+    }
+
+    pub fn load_img(
+        md: Ref<'_, Model>,
+        down_fn: String,
+        hw: (u64, u64),
+        ihw: (u64, u64),
+        d: Direction,
+        ctx: &Context,
+    ) {
+        let ttx = Arc::clone(&md.thread_sender);
+        let ctx = ctx.clone();
+
+        md.dispatch_exclusive(ThreadLabel::RegisterLoadPreview, true, async move {
+            println!("Dispatch!");
+            println!("({}, {})", hw.0, hw.1);
+            let im = egui_image_from_path(down_fn, (0, 0), hw, ihw, 1, &d).await;
+            ctx.request_repaint();
+            ttx.send(ThreadResponse::RegisterLoadPreview(im)).await;
         });
+    }
+
+    fn set_place_holder(&mut self, ctx: &Context) {
+        let im = egui::ColorImage::filled([1000, 1500], Color32::BLACK);
+        let h = ctx.load_texture("placeholder", im, Default::default());
+        self.image_data2 = Some(h);
     }
 
     pub fn unselect_all(&mut self) {
@@ -102,13 +143,67 @@ impl RegisterController {
         }
     }
 
-    pub fn on_atlas_interact(&mut self, model: &Model, ctx: &Context) {
+    pub fn on_atlas_interact(&mut self, ctx: &Context) {
+        let model = self.model.borrow();
         let mat = model
             .atlas
             .get_reference_img(self.atlas_orientation, self.slider_pos as isize);
         let image = egui_image_from_mat(mat);
         let h = ctx.load_texture("atlas", image, Default::default());
         self.image_data2 = Some(h);
+    }
+
+    pub fn n_atlas_slices(&self, orientation: Orientation) -> usize {
+        let model = self.model.borrow();
+        model.atlas.n_slices(orientation)
+    }
+
+    pub fn img_ids(&self) -> Vec<String> {
+        let md = self.model.borrow();
+        vec![
+            md.workspace
+                .converted_images
+                .values()
+                .map(|i| i.id())
+                .collect::<Vec<String>>(),
+            md.workspace
+                .registered_images
+                .values()
+                .map(|i| i.id())
+                .collect(),
+        ]
+        .concat()
+    }
+
+    pub fn reg_statuses(&self) -> Vec<String> {
+        let md = self.model.borrow();
+        vec![
+            md.workspace
+                .converted_images
+                .values()
+                .map(|_| "Not Registered".into())
+                .collect::<Vec<String>>(),
+            md.workspace
+                .registered_images
+                .values()
+                .map(|i| i.state.registration_status.to_str().to_string())
+                .collect(),
+        ]
+        .concat()
+    }
+
+    pub fn rotate_image(&mut self, im_id: &String) {
+        let mut md = self.model.borrow_mut();
+
+        if md.is_registered(im_id) {
+            let im_md = md.workspace.registered_images.get_mut(im_id).unwrap();
+            im_md.rotate();
+        } else if md.is_converted(im_id) {
+            let im_md = md.workspace.converted_images.get_mut(im_id).unwrap();
+            im_md.rotate();
+        }
+
+        md.save_workspace();
     }
 
     pub fn register_button_pushed(&mut self) {
@@ -134,7 +229,6 @@ impl RegisterController {
     }
 
     pub fn render(&mut self, ui: &mut Ui) {
-        let model = Rc::clone(&self.model);
-        register_view::ui_tab_register(self, ui, &model.borrow());
+        register_view::ui_tab_register(self, ui);
     }
 }
