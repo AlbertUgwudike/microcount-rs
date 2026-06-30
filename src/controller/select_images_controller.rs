@@ -8,7 +8,7 @@ use crate::{
         image_metadata::{ConvFn, DownFn, SourceFn},
         Model,
     },
-    utility::io::egui_image_from_path,
+    utility::io::load_image_from_path,
     view::ui_tab_select_images,
     ThreadLabel, ThreadResponse,
 };
@@ -241,7 +241,7 @@ impl SelectImagesController {
         md.dispatch_exclusive(ThreadLabel::SelectImagesLoadPreview, true, async move {
             println!("Dispatch!");
             println!("({}, {})", hw.0, hw.1);
-            let im = egui_image_from_path(src_fn, (0, 0), hw, hw, 1, &dir).await;
+            let im = load_image_from_path(src_fn, (0, 0), hw, hw, 1, &dir).await;
             ctx.request_repaint();
             ttx.send(ThreadResponse::SelectImagesLoadPreview(im)).await;
         });
@@ -269,7 +269,7 @@ impl SelectImagesController {
             ThreadLabel::SelectImagesLoadImage,
             true,
             async move {
-                let im = egui_image_from_path(src_fn, origin, hw, ihw, 1, &dir).await;
+                let im = load_image_from_path(src_fn, origin, hw, ihw, 1, &dir).await;
                 ctx.request_repaint();
                 ttx.send(ThreadResponse::SelectImagesLoadImage(im)).await;
             },

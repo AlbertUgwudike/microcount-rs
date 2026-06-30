@@ -15,6 +15,7 @@ use tokio::sync::mpsc::Receiver;
 use crate::concurrency::ThreadPool;
 use crate::controller::{HomeController, RegisterController, SelectImagesController};
 use crate::model::{ConvertStatus, Model};
+use crate::utility::types::Volume;
 
 #[tokio::main]
 async fn main() -> eframe::Result {
@@ -44,12 +45,12 @@ pub enum ThreadLabel {
 }
 
 pub enum ThreadResponse {
-    SelectImagesLoadPreview(io::Result<ColorImage>),
-    SelectImagesLoadImage(io::Result<ColorImage>),
+    SelectImagesLoadPreview(io::Result<Volume<u8>>),
+    SelectImagesLoadImage(io::Result<Volume<u8>>),
     Convert(String, f64),
     Converted(String),
     Downsampled(String),
-    RegisterLoadPreview(io::Result<ColorImage>),
+    RegisterLoadPreview(Volume<u8>),
 }
 
 enum Tab {
@@ -100,12 +101,12 @@ impl eframe::App for MyApp {
         while let Ok(msg) = self.reciever.try_recv() {
             match msg {
                 ThreadResponse::SelectImagesLoadPreview(res) => {
-                    let h = ctx.load_texture("screenshot_demo", res.unwrap(), Default::default());
-                    self.select_images_controller.state.preview_image_data = Some(h)
+                    // let h = ctx.load_texture("screenshot_demo", res.unwrap(), Default::default());
+                    // self.select_images_controller.state.preview_image_data = Some(h)
                 }
                 ThreadResponse::SelectImagesLoadImage(res) => {
-                    let h = ctx.load_texture("screenshot_demo2", res.unwrap(), Default::default());
-                    self.select_images_controller.state.image_data = Some(h)
+                    // let h = ctx.load_texture("screenshot_demo2", res.unwrap(), Default::default());
+                    // self.select_images_controller.state.image_data = Some(h)
                 }
                 ThreadResponse::Convert(im_id, progress) => {
                     let mut md = self.model.borrow_mut();
@@ -122,8 +123,7 @@ impl eframe::App for MyApp {
                     let _ = md.raw_to_converted(im_id);
                 }
                 ThreadResponse::RegisterLoadPreview(res) => {
-                    let h = ctx.load_texture("screenshot_demo", res.unwrap(), Default::default());
-                    self.register_controller.image_data = Some(h)
+                    self.register_controller.hist_slice_data = Some(res);
                 }
             }
         }

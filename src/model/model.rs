@@ -7,7 +7,9 @@ use std::pin::Pin;
 use std::{fs, sync::Arc};
 use tokio::sync::mpsc::Sender;
 
-use crate::model::image_metadata::{Converted, Raw, Registered, SourceFn, Unregistered};
+use crate::model::image_metadata::{Converted, Raw, SourceFn};
+use crate::model::transformation::MaskGenerator;
+use crate::model::Region;
 use crate::{
     model::{Atlas, ImageMetadata, Workspace},
     ThreadLabel, ThreadResponse,
@@ -71,30 +73,17 @@ impl Model {
         self.workspace.converted_images.contains_key(im_id)
     }
 
-    pub fn is_registered(&self, im_id: &String) -> bool {
-        self.workspace.registered_images.contains_key(im_id)
-    }
-
     pub fn raw_to_converted(&mut self, im_id: String) -> io::Result<()> {
         if let Some(old_im) = self.workspace.raw_images.remove(&im_id) {
             let new_im = old_im.set_metadata()?;
             self.workspace.converted_images.insert(im_id, new_im);
+            self.save_workspace();
         }
         Ok(())
     }
 
-    pub fn get_converted_image(
-        &self,
-        im_id: &String,
-    ) -> Option<&ImageMetadata<Converted<Unregistered>>> {
+    pub fn get_converted_image(&self, im_id: &String) -> Option<&ImageMetadata<Converted>> {
         self.workspace.converted_images.get(im_id)
-    }
-
-    pub fn get_registered_image(
-        &self,
-        im_id: &String,
-    ) -> Option<&ImageMetadata<Converted<Registered>>> {
-        self.workspace.registered_images.get(im_id)
     }
 
     pub fn get_raw_image(&self, im_id: &String) -> Option<&ImageMetadata<Raw>> {
@@ -106,6 +95,18 @@ impl Model {
         let folder = Path::new(&dir_name);
         let ws_s = serde_json::to_string(&self.workspace).unwrap();
         fs::write(folder.join("ws.json"), ws_s).ok();
+    }
+
+    fn generate_mask(&self, region: &Region) -> Vec<bool> {
+        match &region.mask_generator {
+            MaskGenerator::Atlas {
+                direction,
+                registration_data,
+                region_key,
+                laterality,
+            } => todo!(),
+            MaskGenerator::Whole => todo!(),
+        }
     }
 
     pub fn dispatch<F>(&self, repaint: bool, f: F)

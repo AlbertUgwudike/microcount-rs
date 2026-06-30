@@ -1,6 +1,9 @@
+use std::f32::consts::PI;
+
 use crate::utility::types::{Matrix, Volume};
-use eframe::egui::{self, ColorImage};
+use eframe::egui::{self, ColorImage, Context, TextureHandle, Ui};
 use image::{ImageBuffer, Luma, Primitive, Rgb};
+use itertools::izip;
 use ndarray::{concatenate, prelude::*, Slice};
 
 pub fn volume_to_matrix_vec<T: Clone>(
@@ -26,6 +29,11 @@ pub fn array2buff<T: Copy + Primitive>(arr: Matrix<T>) -> ImageBuffer<Luma<T>, V
     let (h, w) = arr.dim();
     let fast = arr.iter().map(|a| a.to_owned()).collect();
     vec2buff(fast, h, w)
+}
+
+pub fn buff2array<T: Copy + Primitive>(arr: ImageBuffer<Luma<T>, Vec<T>>) -> Matrix<T> {
+    let (w, h) = arr.dimensions();
+    Matrix::from_shape_vec((h as usize, w as usize), arr.to_vec()).unwrap()
 }
 
 pub fn vec2buff<T: Copy + Primitive>(
@@ -77,9 +85,22 @@ pub fn get_slice<T: Clone>(vol: &Volume<T>, idx: isize, axis: usize) -> Matrix<T
         .to_owned()
 }
 
-pub fn egui_image_from_mat(mat: Matrix<u16>) -> ColorImage {
-    let im = array2buff(mat.map(|&p| std::cmp::min(p, 255) as u8));
-    let (h, w) = mat.dim();
-    let pixels = im.as_flat_samples();
-    egui::ColorImage::from_gray([w, h], pixels.as_slice())
+pub fn gen_hex((h, w): (usize, usize)) -> [(f32, f32); 6] {
+    let r = (std::cmp::min(h, w) as f32) * 0.4;
+    let mut out = [(0.0, 0.0); 6];
+    for i in 0..6 {
+        let theta = (PI / 3.0) * i as f32;
+        out[i] = (
+            r * f32::sin(theta) + w as f32 / 2.0,
+            r * f32::cos(theta) + h as f32 / 2.0,
+        );
+    }
+    out
 }
+
+// pub fn egui_image_from_mat(mat: &Matrix<u16>) -> ColorImage {
+//     let im = array2buff(mat.map(|&p| std::cmp::min(p, 255) as u8));
+//     let (h, w) = mat.dim();
+//     let pixels = im.as_flat_samples();
+//     let im = egui::ColorImage::from_gray([w, h], pixels.as_slice());
+// }

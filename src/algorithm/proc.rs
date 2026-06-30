@@ -3,14 +3,17 @@ use std::f32::consts::PI;
 use std::ops::Div;
 
 use crate::algorithm::helpers::conv;
-use crate::utility::imops::{array2buff, vec2buff};
+use crate::utility::imops::{array2buff, buff2array, vec2buff};
 use crate::utility::io::{save_as_luma16, save_as_luma8};
-use crate::utility::types::Matrix;
+use crate::utility::types::{Matrix, Volume};
 
 use image::imageops::FilterType;
 use image::{ImageBuffer, Luma};
-use imageproc::geometric_transformations::{rotate, warp, warp_with, Interpolation, Projection};
+use imageproc::geometric_transformations::{
+    rotate, warp, warp_into, warp_with, Interpolation, Projection,
+};
 use imageproc::image::imageops::resize;
+use nalgebra::{dmatrix, matrix, stack};
 use ndarray::prelude::*;
 
 pub fn pacefilt(img: &Matrix<f64>, l: usize, sigma: f64) -> Matrix<f64> {
@@ -157,4 +160,76 @@ fn mutual_information(
             acc + a * (a / px_py[idx]).ln()
         }
     })
+}
+
+pub fn register_control_points(
+    moving: [(f32, f32); 6],
+    fixed: [(f32, f32); 6],
+) -> Option<[f32; 6]> {
+    let comp = |(a, b): (f32, f32)| matrix![ a, b, 1.0, 0.0, 0.0, 0.0; 0.0, 0.0, 0.0, a, b, 1.0];
+
+    let m = stack![
+        comp(moving[0]);
+        comp(moving[1]);
+        comp(moving[2]);
+        comp(moving[3]);
+        comp(moving[4]);
+        comp(moving[5])
+    ];
+
+    let z = matrix![
+        fixed[0].0; fixed[0].1;
+        fixed[1].0; fixed[1].1;
+        fixed[2].0; fixed[2].1;
+        fixed[3].0; fixed[3].1;
+        fixed[4].0; fixed[4].1;
+        fixed[5].0; fixed[5].1;
+    ];
+
+    let svd = m.svd(true, true);
+    let arr = svd.solve(&z, 1e-6).ok()?;
+
+    // m.qr().solve(&z).map(|arr| {
+    let mut out = [0.0; 6];
+    for i in 0..6 {
+        out[i] = arr[i];
+    }
+    Some(out)
+    // })
+}
+
+pub fn warp_image(
+    atlas_slice: Matrix<u16>,
+    (h, w): (usize, usize),
+    theta: [f32; 6],
+) -> Matrix<u16> {
+    let mut t = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+    for i in 0..6 {
+        t[i] = theta[i]
+    }
+
+    let proj = Projection::from_matrix(t).unwrap();
+    let r_moving = array2buff(atlas_slice);
+    // let new_moving = warp(&r_moving, &proj, Interpolation::Nearest, Luma([0]));
+
+    let mut new_moving = ImageBuffer::from_pixel(w as u32, h as u32, Luma([0]));
+    warp_into(
+        &r_moving,
+        &proj,
+        Interpolation::Nearest,
+        Luma([0]),
+        &mut new_moving,
+    );
+
+    buff2array(new_moving)
+}
+
+pub fn add_overlay(img: &mut Volume<u8>, overlay: Matrix<u8>) {
+    for (idx, v) in overlay.indexed_iter() {
+        if *v != 0 {
+            img[(0, idx.0, idx.1)] = 255;
+            img[(1, idx.0, idx.1)] = 255;
+            img[(2, idx.0, idx.1)] = 255;
+        }
+    }
 }

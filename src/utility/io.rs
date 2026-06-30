@@ -4,8 +4,8 @@ use std::{io, ops::Div};
 use crate::{
     model::transformation::Direction,
     utility::{
-        imops::{array2buff, array2rgb_buff, stack_rgb},
-        types::Matrix,
+        imops::{array2buff, array2rgb_buff, matrix_vec_to_volume, stack_rgb},
+        types::{Matrix, Volume},
     },
 };
 
@@ -92,42 +92,47 @@ pub async fn read_tiff_region_as(
         }
     }
 
-    let flat = izip!(
-        pxs_vec[0].to_vec(),
-        pxs_vec[1].to_vec(),
-        pxs_vec[2].to_vec()
-    )
-    .map(|(a, b, c)| [a, b, c])
-    .flatten()
-    .chunks(h.div(df) as usize * w.div_ceil(df) as usize);
+    Ok(pxs_vec)
 
-    println!(
-        "Pixels: {:?}",
-        (h.div(df) as usize, w.div_ceil(df) as usize)
-    );
-    println!("Pixels: {:?}", h.div(df) as usize * w.div_ceil(df) as usize);
-    println!(
-        "Pixels: {:?}",
-        pxs_vec.iter().map(|a| a.len()).collect::<Vec<usize>>()
-    );
+    // let out: Vec<u16> = izip!(
+    //     pxs_vec[0].to_vec(),
+    //     pxs_vec[1].to_vec(),
+    //     pxs_vec[2].to_vec()
+    // )
+    // .map(|(a, b, c)| [a, b, c])
+    // .flatten()
+    // .collect();
+    // // .chunks(h.div(df) as usize * w.div_ceil(df) as usize);
 
-    let mut out = vec![];
+    // println!(
+    //     "Pixels: {:?}",
+    //     (h.div(df) as usize, w.div_ceil(df) as usize)
+    // );
+    // println!("Pixels: {:?}", h.div(df) as usize * w.div_ceil(df) as usize);
+    // println!(
+    //     "Pixels: {:?}",
+    //     pxs_vec.iter().map(|a| a.len()).collect::<Vec<usize>>()
+    // );
 
-    for arr in &flat {
-        out.push(arr.collect());
-    }
+    // // let mut out = vec![];
 
-    Ok(out)
+    // // for arr in &flat {
+    // //     out.push(arr.collect());
+    // // }
+
+    // println!("Flat: {:?}", out.len());
+
+    // Ok(out)
 }
 
-pub async fn egui_image_from_path(
+pub async fn load_image_from_path(
     path: String,
     origin: (u64, u64),
     (h, w): (u64, u64),
     (ih, iw): (u64, u64),
     df: u64,
     direction: &Direction,
-) -> io::Result<egui::ColorImage> {
+) -> io::Result<Volume<u8>> {
     let t_origin = transform_origin(origin, (h, w), (ih, iw), direction);
 
     let (t_h, t_w) = match direction {
@@ -135,27 +140,37 @@ pub async fn egui_image_from_path(
         Direction::East | Direction::West => (w, h),
     };
 
-    let pixels: Vec<u8> = read_tiff_region_as(&path, (t_origin.1, t_origin.0), (t_h, t_w), df)
+    let pixels: Vec<Vec<u8>> = read_tiff_region_as(&path, (t_origin.1, t_origin.0), (t_h, t_w), df)
         .await?
         .into_iter()
-        .flatten()
-        .map(|p| std::cmp::min(255, p) as u8)
+        // .flatten()
+        .map(|v| {
+            v.iter()
+                .map(|p| std::cmp::min(255, *p) as u8)
+                .collect::<Vec<u8>>()
+        })
         .collect();
 
-    let chunks = pixels
-        .chunks_exact(3)
-        .into_iter()
-        .map(|v| [v[0], v[1], v[2]])
-        .collect();
-
-    let pixels: Vec<u8> = rotate_image(&chunks, (t_h, t_w), direction)
-        .into_iter()
-        .flatten()
-        .collect();
+    // let chunks = pixels
+    //     .chunks_exact(3)
+    //     .into_iter()
+    //     .map(|v| [v[0], v[1], v[2]])
+    //     .collect();
 
     let (w, h) = (w.div_ceil(df) as usize, h.div(df) as usize);
+    let pixels: Vec<Matrix<u8>> = pixels
+        .iter()
+        .map(|v| {
+            let im = rotate_image(&v, (t_h, t_w), direction);
+            Matrix::from_shape_vec([h, w], im).unwrap()
+        })
+        .collect();
 
-    Ok(egui::ColorImage::from_rgb([w, h], &pixels))
+    Ok(matrix_vec_to_volume(&pixels).unwrap())
+
+    // let (w, h) = (w.div_ceil(df) as usize, h.div(df) as usize);
+
+    // Ok(egui::ColorImage::from_rgb([w, h], &pixels))
 }
 
 fn transform_origin(
@@ -173,8 +188,8 @@ fn transform_origin(
     rotate_coord(ori, (ih, iw), &direction.reciprocal())
 }
 
-fn rotate_image<'a>(img: &Vec<[u8; 3]>, (h, w): (u64, u64), direction: &Direction) -> Vec<[u8; 3]> {
-    let mut out = vec![[0, 0, 0]; (h * w) as usize];
+fn rotate_image<'a>(img: &Vec<u8>, (h, w): (u64, u64), direction: &Direction) -> Vec<u8> {
+    let mut out = vec![0; (h * w) as usize];
 
     let m = match direction {
         Direction::North | Direction::South => w,

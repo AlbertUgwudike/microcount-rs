@@ -1,7 +1,10 @@
-use serde::Deserialize;
+use ndarray::array;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs};
 use tiff::TiffError;
 
+use crate::algorithm::binary::grad;
+use crate::algorithm::helpers::conv;
 use crate::utility::imops::{get_slice, matrix_vec_to_volume};
 use crate::utility::io::read_tiff_region;
 use crate::utility::types::{Matrix, Volume};
@@ -53,11 +56,20 @@ impl Atlas {
         })
     }
 
-    pub fn get_reference_img(&self, ori: Orientation, idx: isize) -> Matrix<u16> {
-        match ori {
+    pub fn get_reference_img(&self, ori: Orientation, idx: isize) -> Matrix<u8> {
+        let v = match ori {
             Orientation::Axial => get_slice(&self.reference, idx, 0),
             Orientation::Sagittal => get_slice(&self.reference, idx, 2),
             Orientation::Coronal => get_slice(&self.reference, idx, 1),
+        };
+        v.map(|a| std::cmp::min(255, *a) as u8)
+    }
+
+    pub fn get_annotation_img(&self, ori: Orientation, idx: isize) -> Matrix<u16> {
+        match ori {
+            Orientation::Axial => get_slice(&self.annotation, idx, 0),
+            Orientation::Sagittal => get_slice(&self.annotation, idx, 2),
+            Orientation::Coronal => get_slice(&self.annotation, idx, 1),
         }
     }
 
@@ -67,6 +79,15 @@ impl Atlas {
             Orientation::Axial => a,
             Orientation::Sagittal => s,
             Orientation::Coronal => c,
+        }
+    }
+
+    pub fn size(&self, ori: Orientation) -> (usize, usize) {
+        let (a, c, s) = self.reference.dim();
+        match ori {
+            Orientation::Axial => (c, s),
+            Orientation::Sagittal => (a, c),
+            Orientation::Coronal => (a, s),
         }
     }
 
@@ -116,7 +137,7 @@ struct StructureRow {
     parent_structure_id: f64,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub enum Orientation {
     Axial,
     Sagittal,

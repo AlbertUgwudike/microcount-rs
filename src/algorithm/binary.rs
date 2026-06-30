@@ -40,6 +40,17 @@ fn connected_pixels(img: &Matrix<bool>, origin: Pnt, visited: &mut Matrix<bool>)
     return out;
 }
 
+pub fn grad(img: &Matrix<f64>) -> Matrix<f64> {
+    let sobel_x = array![[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]];
+    let sobel_y = array![[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]];
+
+    let fimg = img.map(|&a| a as f64);
+
+    let grad_x = conv(&fimg, &sobel_x);
+    let grad_y = conv(&fimg, &sobel_y);
+    grad_x.pow2() + grad_y.pow2()
+}
+
 pub fn perimeter(img: &Matrix<u32>) -> Matrix<u32> {
     let sobel_x = array![[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]];
     let sobel_y = array![[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]];
