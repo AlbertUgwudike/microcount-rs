@@ -13,7 +13,9 @@ use eframe::egui::{self, ColorImage, Context};
 use tokio::sync::mpsc::Receiver;
 
 use crate::concurrency::ThreadPool;
-use crate::controller::{HomeController, RegisterController, SelectImagesController};
+use crate::controller::{
+    HomeController, RegionsController, RegisterController, SelectImagesController,
+};
 use crate::model::{ConvertStatus, Model};
 use crate::utility::types::Volume;
 
@@ -42,6 +44,7 @@ pub enum ThreadLabel {
     SelectImagesLoadPreview,
     SelectImagesLoadImage,
     RegisterLoadPreview,
+    RegionsLoadPreview,
 }
 
 pub enum ThreadResponse {
@@ -51,6 +54,7 @@ pub enum ThreadResponse {
     Converted(String),
     Downsampled(String),
     RegisterLoadPreview(Volume<u8>),
+    RegionsLoadPreview(Volume<u8>),
 }
 
 enum Tab {
@@ -68,6 +72,7 @@ struct MyApp {
     home_controller: HomeController,
     select_images_controller: SelectImagesController,
     register_controller: RegisterController,
+    regions_controller: RegionsController,
 }
 
 impl MyApp {
@@ -87,6 +92,7 @@ impl MyApp {
             home_controller: HomeController::new(Rc::clone(&model)),
             select_images_controller: SelectImagesController::new(Rc::clone(&model)),
             register_controller: RegisterController::new(Rc::clone(&model)),
+            regions_controller: RegionsController::new(Rc::clone(&model)),
             model,
         }
     }
@@ -125,6 +131,9 @@ impl eframe::App for MyApp {
                 ThreadResponse::RegisterLoadPreview(res) => {
                     self.register_controller.hist_slice_data = Some(res);
                 }
+                ThreadResponse::RegionsLoadPreview(res) => {
+                    self.regions_controller.image_data = Some(res)
+                }
             }
         }
 
@@ -157,7 +166,7 @@ impl eframe::App for MyApp {
                 Tab::Home => self.home_controller.render(ui),
                 Tab::SelectImages => self.select_images_controller.render(ui),
                 Tab::Register => self.register_controller.render(ui),
-                Tab::SelectRegions => {}
+                Tab::SelectRegions => self.regions_controller.render(ui),
                 Tab::Analyse => {}
             }
         });

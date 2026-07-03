@@ -1,6 +1,8 @@
 use std::ops::Div;
 
-use eframe::egui::{self, Color32, Pos2, Rect, Scene, Sense, Shape, Stroke, Ui, Vec2};
+use eframe::egui::{
+    self, Align2, Color32, FontId, Pos2, Rect, Scene, Sense, Shape, Stroke, Ui, Vec2,
+};
 
 use crate::{
     controller::RegisterController,
@@ -92,6 +94,7 @@ fn image_viewer(con: &mut RegisterController, ui: &mut egui::Ui) {
 
                 if r.response.double_clicked() {
                     con.left_scene_rect = inner_rect;
+                    con.atlas_scene_tf.scaling = 1.0;
                 }
 
                 ui.horizontal(|ui| {
@@ -132,6 +135,7 @@ fn image_viewer(con: &mut RegisterController, ui: &mut egui::Ui) {
 
             if r.response.double_clicked() {
                 con.right_scene_rect = inner_rect;
+                con.hist_scene_tf.scaling = 1.0;
             }
         });
     });
@@ -162,6 +166,13 @@ fn draw_hex(pos: &mut [(f32, f32); 6], scale: f32, ui: &mut egui::Ui) {
 
         let circ_rect = Rect::from_center_size(start, Vec2::new(10.0, 10.0) / scale);
         painter.circle(start, 5.0 / scale, Color32::GREEN, Stroke::NONE);
+        painter.text(
+            start,
+            Align2::CENTER_CENTER,
+            (i + 1).to_string(),
+            FontId::new(f32::max(10.0 / scale, 6.0), egui::FontFamily::Monospace),
+            Color32::BLUE,
+        );
 
         let res = ui.interact(circ_rect, response.id.with(i), Sense::drag());
         start += res.drag_delta() + res_1.drag_delta();
