@@ -5,19 +5,18 @@ pub mod model;
 pub mod utility;
 pub mod view;
 
-use std::cell::RefCell;
-use std::io;
-use std::rc::Rc;
-
-use eframe::egui::{self, ColorImage, Context};
+use eframe::egui::{self, Context};
 use tokio::sync::mpsc::Receiver;
 
 use crate::concurrency::ThreadPool;
-use crate::controller::{
-    HomeController, RegionsController, RegisterController, SelectImagesController,
-};
+use crate::controller::home_controller::HomeState;
+use crate::controller::regions_controller::RegionsState;
+use crate::controller::register_controller::RegisterState;
+use crate::controller::select_images_controller::SelectImagesState;
+use crate::controller::{HomeController, RegionsController, RegisterController, SelectController};
 use crate::model::{ConvertStatus, Model};
 use crate::utility::types::Volume;
+use crate::view::view_utils::egui_display_rgb;
 
 #[tokio::main]
 async fn main() -> eframe::Result {
@@ -48,8 +47,8 @@ pub enum ThreadLabel {
 }
 
 pub enum ThreadResponse {
-    SelectImagesLoadPreview(io::Result<Volume<u8>>),
-    SelectImagesLoadImage(io::Result<Volume<u8>>),
+    SelectImagesLoadPreview(Volume<u8>),
+    SelectImagesLoadImage(Volume<u8>),
     Convert(String, f64),
     Converted(String),
     Downsampled(String),
@@ -59,46 +58,41 @@ pub enum ThreadResponse {
 
 enum Tab {
     Home,
-    SelectImages,
+    Select,
     Register,
-    SelectRegions,
+    Regions,
     Analyse,
 }
 
 struct MyApp {
     reciever: Receiver<ThreadResponse>,
-    model: Rc<RefCell<Model>>,
+    model: Model,
     selected_tab: Tab,
-    home_controller: HomeController,
-    select_images_controller: SelectImagesController,
-    register_controller: RegisterController,
-    regions_controller: RegionsController,
+    home_state: HomeState,
+    select_images_state: SelectImagesState,
+    register_state: RegisterState,
+    regions_state: RegionsState,
 }
 
 impl MyApp {
     fn new(context: Context) -> Self {
         let dir_name = "/Users/albert/projects/microcount-rs/src".into();
         let tp = ThreadPool::new(10, 10);
-        let model = Rc::new(RefCell::new(Model::new(
-            dir_name,
-            tp.sender,
-            tp.thread_sender,
-            context,
-        )));
+        let model = Model::new(dir_name, tp.sender, tp.thread_sender, context);
 
         Self {
             reciever: tp.reciever,
             selected_tab: Tab::Home,
-            home_controller: HomeController::new(Rc::clone(&model)),
-            select_images_controller: SelectImagesController::new(Rc::clone(&model)),
-            register_controller: RegisterController::new(Rc::clone(&model)),
-            regions_controller: RegionsController::new(Rc::clone(&model)),
+            home_state: HomeState::new(model.get_dir_name()),
+            select_images_state: SelectImagesState::default(),
+            register_state: RegisterState::default(),
+            regions_state: RegionsState::default(),
             model,
         }
     }
 
     fn workspace_loaded(&self) -> bool {
-        self.model.borrow().workspace_loaded
+        self.model.workspace_loaded
     }
 }
 
@@ -107,32 +101,31 @@ impl eframe::App for MyApp {
         while let Ok(msg) = self.reciever.try_recv() {
             match msg {
                 ThreadResponse::SelectImagesLoadPreview(res) => {
-                    // let h = ctx.load_texture("screenshot_demo", res.unwrap(), Default::default());
-                    // self.select_images_controller.state.preview_image_data = Some(h)
+                    let h = egui_display_rgb(ctx, &res);
+                    self.select_images_state.preview_image_data = Some((h, res));
                 }
                 ThreadResponse::SelectImagesLoadImage(res) => {
-                    // let h = ctx.load_texture("screenshot_demo2", res.unwrap(), Default::default());
-                    // self.select_images_controller.state.image_data = Some(h)
+                    let h = egui_display_rgb(ctx, &res);
+                    self.select_images_state.image_data = Some((h, res));
                 }
                 ThreadResponse::Convert(im_id, progress) => {
-                    let mut md = self.model.borrow_mut();
-                    let im_md = md.workspace.raw_images.get_mut(&im_id).unwrap();
+                    let im_md = self.model.workspace.raw_images.get_mut(&im_id).unwrap();
                     im_md.state.conversion_status = ConvertStatus::Converting(progress);
                 }
                 ThreadResponse::Converted(im_id) => {
-                    let mut md = self.model.borrow_mut();
-                    let im_md = md.workspace.raw_images.get_mut(&im_id).unwrap();
+                    let im_md = self.model.workspace.raw_images.get_mut(&im_id).unwrap();
                     im_md.state.conversion_status = ConvertStatus::Converted;
                 }
                 ThreadResponse::Downsampled(im_id) => {
-                    let mut md = self.model.borrow_mut();
-                    let _ = md.raw_to_converted(im_id);
+                    let _ = self.model.raw_to_converted(im_id);
                 }
                 ThreadResponse::RegisterLoadPreview(res) => {
-                    self.register_controller.hist_slice_data = Some(res);
+                    let h = egui_display_rgb(ctx, &res);
+                    self.register_state.hist_slice_data = Some((h, res));
                 }
                 ThreadResponse::RegionsLoadPreview(res) => {
-                    self.regions_controller.image_data = Some(res)
+                    let h = egui_display_rgb(ctx, &res);
+                    self.regions_state.image_data = Some((h, res))
                 }
             }
         }
@@ -143,13 +136,13 @@ impl eframe::App for MyApp {
                     self.selected_tab = Tab::Home;
                 }
                 if ui.button("Select Images").clicked() {
-                    self.selected_tab = Tab::SelectImages;
+                    self.selected_tab = Tab::Select;
                 }
                 if ui.button("Register").clicked() {
                     self.selected_tab = Tab::Register;
                 }
                 if ui.button("Select Regions").clicked() {
-                    self.selected_tab = Tab::SelectRegions;
+                    self.selected_tab = Tab::Regions;
                 }
                 if ui.button("Analyse").clicked() {
                     self.selected_tab = Tab::Analyse;
@@ -159,14 +152,16 @@ impl eframe::App for MyApp {
             ui.separator();
 
             if !self.workspace_loaded() {
-                return self.home_controller.render(ui);
+                return HomeController::render(&mut self.model, &mut self.home_state, ui);
             }
 
+            let md = &mut self.model;
+
             match self.selected_tab {
-                Tab::Home => self.home_controller.render(ui),
-                Tab::SelectImages => self.select_images_controller.render(ui),
-                Tab::Register => self.register_controller.render(ui),
-                Tab::SelectRegions => self.regions_controller.render(ui),
+                Tab::Home => HomeController::render(md, &mut self.home_state, ui),
+                Tab::Select => SelectController::render(md, &mut self.select_images_state, ui),
+                Tab::Register => RegisterController::render(md, &mut self.register_state, ui),
+                Tab::Regions => RegionsController::render(md, &mut self.regions_state, ui),
                 Tab::Analyse => {}
             }
         });

@@ -41,21 +41,21 @@ fn black_box(ui: &mut Ui, name: &str, add_contents: impl FnOnce(&mut Ui) -> ()) 
 fn image_viewer(con: &mut RegionsController, ui: &mut egui::Ui) {
     black_box(ui, "right", |ui| {
         let mut inner_rect = Rect::NAN;
-        let mut tmp = con.scene_rect;
+        let mut tmp = con.state.scene_rect;
 
         let scene = Scene::new().zoom_range(0.0..=f32::INFINITY);
 
         let r = scene.show(ui, &mut tmp, |ui: &mut Ui| {
-            if let Some(im) = &con.image_data {
-                egui_display_rgb(ui, im);
+            if let Some(im) = &con.state.image_data {
+                ui.image(&im.0);
             }
             inner_rect = ui.min_rect();
         });
 
-        con.scene_rect = tmp;
+        con.state.scene_rect = tmp;
 
         if r.response.double_clicked() {
-            con.scene_rect = inner_rect;
+            con.state.scene_rect = inner_rect;
         }
     });
 }
@@ -64,15 +64,15 @@ fn region_dashboard_ui(con: &mut RegionsController, ui: &mut egui::Ui) {
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             if ui.button("Atlas").clicked() {
-                if let Some(im_id) = &con.selected_img.clone() {
-                    con.selection_mode = SelectionMode::Atlas;
+                if let Some(im_id) = &con.state.selected_img.clone() {
+                    con.state.selection_mode = SelectionMode::Atlas;
                     con.on_image_selected(im_id, ui.ctx());
                 }
             }
 
             if ui.button("Rect").clicked() {
-                if let Some(im_id) = &con.selected_img.clone() {
-                    con.selection_mode = SelectionMode::Rect;
+                if let Some(im_id) = &con.state.selected_img.clone() {
+                    con.state.selection_mode = SelectionMode::Rect;
                     con.on_image_selected(im_id, ui.ctx());
                 }
             }
@@ -80,7 +80,7 @@ fn region_dashboard_ui(con: &mut RegionsController, ui: &mut egui::Ui) {
 
         ui.separator();
 
-        match con.selection_mode {
+        match con.state.selection_mode {
             SelectionMode::Atlas => atlas_selection_ui(con, ui),
             SelectionMode::Rect => rect_selection_ui(con, ui),
         }
@@ -153,7 +153,7 @@ fn table_ui(con: &mut RegionsController, ui: &mut egui::Ui) {
                 let idx = row.index();
                 let id = &img_ids[idx];
 
-                row.set_selected(con.selection.contains(id));
+                row.set_selected(con.state.selection.contains(id));
                 row.set_overline(true);
 
                 row.col(|ui| {

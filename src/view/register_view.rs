@@ -16,7 +16,7 @@ pub fn ui_tab_register(con: &mut RegisterController, ui: &mut egui::Ui) {
         ui.separator();
 
         ui.horizontal(|ui| {
-            if let Some(im_id) = &con.selected_img.clone() {
+            if let Some(im_id) = &con.state.selected_img.clone() {
                 if ui.button("Register").clicked() {
                     con.register_button_pushed();
                     con.on_image_selected(im_id, ui.ctx());
@@ -28,7 +28,7 @@ pub fn ui_tab_register(con: &mut RegisterController, ui: &mut egui::Ui) {
                 }
 
                 if ui.button("Toggle Overlay").clicked() {
-                    con.show_overlay = !con.show_overlay;
+                    con.state.show_overlay = !con.state.show_overlay;
                     con.on_image_selected(im_id, ui.ctx());
                 }
             }
@@ -71,42 +71,46 @@ fn image_viewer(con: &mut RegisterController, ui: &mut egui::Ui) {
 
                     if toggle_ori_button.clicked() {
                         con.toggle_atlas_orientation();
-                        con.on_atlas_interact();
+                        con.on_atlas_interact(ui.ctx());
                     }
                 });
 
                 let mut inner_rect = Rect::NAN;
-                let mut tmp = con.left_scene_rect;
+                let mut tmp = con.state.left_scene_rect;
 
                 let scene = Scene::new().zoom_range(0.0..=f32::INFINITY);
                 let mut r = scene.show(ui, &mut tmp, |ui: &mut Ui| {
-                    if let Some(im) = &con.atlas_slice_data {
-                        egui_display_gray(ui, im);
+                    if let Some(im) = &con.state.atlas_slice_data {
+                        ui.image(&im.0);
                     }
 
                     inner_rect = ui.min_rect();
-                    draw_hex(&mut con.atlas_hex, con.atlas_scene_tf.scaling, ui);
+                    draw_hex(
+                        &mut con.state.atlas_hex,
+                        con.state.atlas_scene_tf.scaling,
+                        ui,
+                    );
                 });
 
-                con.left_scene_rect = tmp;
+                con.state.left_scene_rect = tmp;
 
-                scene.register_pan_and_zoom(ui, &mut r.response, &mut con.atlas_scene_tf);
+                scene.register_pan_and_zoom(ui, &mut r.response, &mut con.state.atlas_scene_tf);
 
                 if r.response.double_clicked() {
-                    con.left_scene_rect = inner_rect;
-                    con.atlas_scene_tf.scaling = 1.0;
+                    con.state.left_scene_rect = inner_rect;
+                    con.state.atlas_scene_tf.scaling = 1.0;
                 }
 
                 ui.horizontal(|ui| {
                     ui.add_space(10.);
                     ui.spacing_mut().slider_width = ui.available_width() - 70.;
 
-                    let n_slices = con.n_atlas_slices(con.atlas_orientation);
-                    let slider = egui::Slider::new(&mut con.slider_pos, 0..=(n_slices - 1));
+                    let n_slices = con.n_atlas_slices(con.state.atlas_orientation);
+                    let slider = egui::Slider::new(&mut con.state.slider_pos, 0..=(n_slices - 1));
                     let slider = ui.add(slider).interact(Sense::click_and_drag());
 
                     if slider.dragged() {
-                        con.on_atlas_interact();
+                        con.on_atlas_interact(ui.ctx());
                     }
                 });
 
@@ -116,26 +120,30 @@ fn image_viewer(con: &mut RegisterController, ui: &mut egui::Ui) {
 
         black_box(&mut ui[1], "right", |ui| {
             let mut inner_rect = Rect::NAN;
-            let mut tmp = con.right_scene_rect;
+            let mut tmp = con.state.right_scene_rect;
 
             let scene = Scene::new().zoom_range(0.0..=f32::INFINITY);
 
             let mut r = scene.show(ui, &mut tmp, |ui: &mut Ui| {
-                if let Some(im) = &con.hist_slice_data {
-                    egui_display_rgb(ui, im);
-                    let dim = std::cmp::max(im.dim().0, im.dim().1) as f32 / 250.0;
-                    draw_hex(&mut con.hist_hex, con.hist_scene_tf.scaling / dim, ui);
+                if let Some(im) = &con.state.hist_slice_data {
+                    ui.image(&im.0);
+                    let dim = std::cmp::max(im.1.dim().0, im.1.dim().1) as f32 / 250.0;
+                    draw_hex(
+                        &mut con.state.hist_hex,
+                        con.state.hist_scene_tf.scaling / dim,
+                        ui,
+                    );
                 }
                 inner_rect = ui.min_rect();
             });
 
-            con.right_scene_rect = tmp;
+            con.state.right_scene_rect = tmp;
 
-            scene.register_pan_and_zoom(ui, &mut r.response, &mut con.hist_scene_tf);
+            scene.register_pan_and_zoom(ui, &mut r.response, &mut con.state.hist_scene_tf);
 
             if r.response.double_clicked() {
-                con.right_scene_rect = inner_rect;
-                con.hist_scene_tf.scaling = 1.0;
+                con.state.right_scene_rect = inner_rect;
+                con.state.hist_scene_tf.scaling = 1.0;
             }
         });
     });
@@ -219,7 +227,7 @@ fn table_ui(con: &mut RegisterController, ui: &mut egui::Ui) {
                 let id = &img_ids[idx];
                 let rs = &reg_statuses[idx];
 
-                row.set_selected(con.selection.contains(id));
+                row.set_selected(con.state.selection.contains(id));
                 row.set_overline(true);
 
                 row.col(|ui| {
@@ -248,7 +256,7 @@ fn table_ui(con: &mut RegisterController, ui: &mut egui::Ui) {
                     con.unselect_all();
                     con.toggle_selection(id);
                     con.on_image_selected(id, &row.response().ctx);
-                    con.on_atlas_interact();
+                    con.on_atlas_interact(&row.response().ctx);
                 }
             });
         });

@@ -3,9 +3,15 @@ use eframe::egui::{
 };
 use std::ops::Div;
 
-use crate::{controller::SelectImagesController, view::black_box};
+use crate::{
+    controller::SelectController,
+    view::{
+        black_box,
+        view_utils::{egui_display_gray, egui_display_rgb},
+    },
+};
 
-pub fn ui_tab_select_images(con: &mut SelectImagesController, ui: &mut egui::Ui) {
+pub fn ui_tab_select_images(con: &mut SelectController, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         if ui.button("Add Images").clicked() {
             con.add_images();
@@ -34,7 +40,7 @@ pub fn ui_tab_select_images(con: &mut SelectImagesController, ui: &mut egui::Ui)
     });
 }
 
-pub fn table_ui(con: &mut SelectImagesController, ui: &mut Ui) {
+pub fn table_ui(con: &mut SelectController, ui: &mut Ui) {
     use egui_extras::{Column, TableBuilder};
 
     let available_height = ui.available_height();
@@ -149,7 +155,7 @@ pub fn table_ui(con: &mut SelectImagesController, ui: &mut Ui) {
         });
 }
 
-pub fn image_viewer(con: &mut SelectImagesController, ui: &mut Ui) {
+pub fn image_viewer(con: &mut SelectController, ui: &mut Ui) {
     ui.columns(2, |ui| {
         black_box(&mut ui[0], "left", |ui| {
             let mut inner_rect = Rect::NAN;
@@ -158,7 +164,9 @@ pub fn image_viewer(con: &mut SelectImagesController, ui: &mut Ui) {
             let scene = Scene::new()
                 .zoom_range(0.0..=f32::INFINITY)
                 .show(ui, &mut tmp, |ui| {
-                    render_preview_img(con, ui);
+                    if let Some(im) = &con.state.preview_image_data {
+                        ui.image(&im.0);
+                    }
                     bounding_box(con, ui);
                     inner_rect = ui.min_rect();
                 });
@@ -177,7 +185,9 @@ pub fn image_viewer(con: &mut SelectImagesController, ui: &mut Ui) {
             let response = Scene::new()
                 .zoom_range(0.0..=f32::INFINITY)
                 .show(ui, &mut tmp, |ui| {
-                    render_image(con, ui);
+                    if let Some(im) = &con.state.image_data {
+                        ui.image(&im.0);
+                    }
                     inner_rect = ui.min_rect();
                 })
                 .response;
@@ -191,15 +201,7 @@ pub fn image_viewer(con: &mut SelectImagesController, ui: &mut Ui) {
     });
 }
 
-pub fn render_preview_img(con: &SelectImagesController, ui: &mut Ui) {
-    con.state.preview_image_data.as_ref().map(|im| ui.image(im));
-}
-
-pub fn render_image(con: &SelectImagesController, ui: &mut Ui) {
-    con.state.image_data.as_ref().map(|im| ui.image(im));
-}
-
-pub fn bounding_box(con: &mut SelectImagesController, ui: &mut Ui) {
+pub fn bounding_box(con: &mut SelectController, ui: &mut Ui) {
     let r = ui.min_rect();
     let painter = ui.painter_at(r);
     let response = ui.interact(painter.clip_rect(), ui.id(), Sense::all());

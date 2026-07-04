@@ -1,11 +1,7 @@
-use std::{
-    cell::{Ref, RefCell},
-    rc::Rc,
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use eframe::{
-    egui::{Context, Rect, Ui, Vec2},
+    egui::{Context, Rect, TextureHandle, Ui},
     emath::TSTransform,
 };
 use ndarray::Array3;
@@ -26,17 +22,19 @@ use crate::{
         io::load_image_from_path,
         types::{Matrix, Volume},
     },
-    view::register_view,
+    view::{
+        register_view,
+        view_utils::{egui_display_gray, egui_display_rgb},
+    },
     ThreadLabel, ThreadResponse,
 };
 
-pub struct RegisterController {
-    model: Rc<RefCell<Model>>,
+pub struct RegisterState {
     pub selection: std::collections::HashSet<String>,
     pub right_scene_rect: Rect,
     pub left_scene_rect: Rect,
-    pub hist_slice_data: Option<Volume<u8>>,
-    pub atlas_slice_data: Option<Matrix<u8>>,
+    pub hist_slice_data: Option<(TextureHandle, Volume<u8>)>,
+    pub atlas_slice_data: Option<(TextureHandle, Matrix<u8>)>,
     pub selected_img: Option<String>,
     pub slider_pos: usize,
     pub atlas_orientation: Orientation,
@@ -47,10 +45,9 @@ pub struct RegisterController {
     pub show_overlay: bool,
 }
 
-impl RegisterController {
-    pub fn new(model: Rc<RefCell<Model>>) -> RegisterController {
+impl Default for RegisterState {
+    fn default() -> Self {
         Self {
-            model,
             selection: Default::default(),
             right_scene_rect: Rect::ZERO,
             left_scene_rect: Rect::ZERO,
@@ -66,39 +63,50 @@ impl RegisterController {
             show_overlay: true,
         }
     }
+}
+
+pub struct RegisterController<'a> {
+    model: &'a mut Model,
+    pub state: &'a mut RegisterState,
+}
+
+impl<'a> RegisterController<'a> {
+    pub fn render(model: &'a mut Model, state: &'a mut RegisterState, ui: &mut Ui) {
+        let mut con = Self { model, state };
+        register_view::ui_tab_register(&mut con, ui);
+    }
 
     pub fn toggle_selection(&mut self, im_md: &String) {
-        if self.selection.contains(im_md) {
-            self.selection.remove(im_md);
+        if self.state.selection.contains(im_md) {
+            self.state.selection.remove(im_md);
         } else {
-            self.selection.insert(im_md.to_string());
+            self.state.selection.insert(im_md.to_string());
         }
     }
 
     pub fn on_image_selected(&mut self, im_id: &String, ctx: &Context) {
-        self.selected_img = Some(im_id.clone());
-        self.set_place_holder();
+        self.state.selected_img = Some(im_id.clone());
+        self.set_place_holder(ctx);
 
-        let md = self.model.borrow();
-        let im_md = md.get_converted_image(im_id).unwrap();
+        let im_md = self.model.get_converted_image(im_id).unwrap();
         let hw = im_md.down_size();
         let hw = ((hw.0 - 1) as u64, (hw.1 - 1) as u64);
         let dir = im_md.state.direction;
         let down_fn = im_md.down_fn().to_owned();
 
         if let Some(r) = &im_md.state.registration_data {
-            self.hist_hex = r.hist_hex;
-            self.atlas_hex = r.atlas_hex;
-            self.slider_pos = r.slice_idx;
+            self.state.hist_hex = r.hist_hex;
+            self.state.atlas_hex = r.atlas_hex;
+            self.state.slider_pos = r.slice_idx;
         } else {
-            self.hist_hex = gen_hex(im_md.down_size());
-            self.atlas_hex = gen_hex(md.atlas.size(self.atlas_orientation));
+            self.state.hist_hex = gen_hex(im_md.down_size());
+            self.state.atlas_hex = gen_hex(self.model.atlas.size(self.state.atlas_orientation));
         }
 
-        let overlay = if self.show_overlay {
+        let overlay = if self.state.show_overlay {
             im_md.state.registration_data.as_ref().map(|r| {
                 let idx = r.slice_idx as isize;
-                let slice = md.atlas.get_annotation_img(r.orientation, idx);
+                let slice = self.model.atlas.get_annotation_img(r.orientation, idx);
                 let slice = warp_image(slice, (hw.0 as usize, hw.1 as usize), r.affine_matrix);
                 grad(&slice.map(|a| *a as f64)).map(|a| if *a == 0.0 { 0 } else { 1 })
             })
@@ -106,11 +114,11 @@ impl RegisterController {
             None
         };
 
-        RegisterController::load_img(md, down_fn, hw, hw, dir, &ctx, overlay);
+        RegisterController::load_img(self.model, down_fn, hw, hw, dir, &ctx, overlay);
     }
 
     pub fn load_img(
-        md: Ref<'_, Model>,
+        md: &mut Model,
         down_fn: String,
         hw: (u64, u64),
         ihw: (u64, u64),
@@ -135,39 +143,41 @@ impl RegisterController {
         });
     }
 
-    fn set_place_holder(&mut self) {
-        let mat = Array3::from_elem((3, 1000, 1500), 0);
-        self.hist_slice_data = Some(mat);
+    fn set_place_holder(&mut self, ctx: &Context) {
+        let im = Volume::from_elem((3, 1000, 1500), 0);
+        let h = egui_display_rgb(ctx, &im);
+        self.state.hist_slice_data = Some((h, im));
     }
 
     pub fn unselect_all(&mut self) {
-        self.selection.clear();
+        self.state.selection.clear();
     }
 
     pub fn toggle_atlas_orientation(&mut self) {
-        self.atlas_orientation = match self.atlas_orientation {
+        self.state.atlas_orientation = match self.state.atlas_orientation {
             Orientation::Axial => Orientation::Coronal,
             Orientation::Coronal => Orientation::Sagittal,
             Orientation::Sagittal => Orientation::Axial,
         }
     }
 
-    pub fn on_atlas_interact(&mut self) {
-        let model = self.model.borrow();
-        let mat = model
+    pub fn on_atlas_interact(&mut self, ctx: &Context) {
+        let mat = self
+            .model
             .atlas
-            .get_reference_img(self.atlas_orientation, self.slider_pos as isize);
-        self.atlas_slice_data = Some(mat);
+            .get_reference_img(self.state.atlas_orientation, self.state.slider_pos as isize);
+
+        let h = egui_display_gray(ctx, &mat);
+        self.state.atlas_slice_data = Some((h, mat));
     }
 
     pub fn n_atlas_slices(&self, orientation: Orientation) -> usize {
-        let model = self.model.borrow();
-        model.atlas.n_slices(orientation)
+        self.model.atlas.n_slices(orientation)
     }
 
     pub fn img_ids(&self) -> Vec<String> {
-        let md = self.model.borrow();
-        md.workspace
+        self.model
+            .workspace
             .converted_images
             .values()
             .map(|i| i.id())
@@ -175,8 +185,8 @@ impl RegisterController {
     }
 
     pub fn reg_statuses(&self) -> Vec<String> {
-        let md = self.model.borrow();
-        md.workspace
+        self.model
+            .workspace
             .converted_images
             .values()
             .map(|im| {
@@ -190,31 +200,37 @@ impl RegisterController {
     }
 
     pub fn rotate_image(&mut self, im_id: &String) {
-        let mut md = self.model.borrow_mut();
-        let im_md = md.workspace.converted_images.get_mut(im_id).unwrap();
+        let im_md = self
+            .model
+            .workspace
+            .converted_images
+            .get_mut(im_id)
+            .unwrap();
+
         im_md.rotate();
 
-        md.save_workspace();
+        self.model.save_workspace();
     }
 
     pub fn register_button_pushed(&mut self) {
-        let im_id = self.selected_img.as_ref().unwrap();
-        let theta = register_control_points(self.atlas_hex, self.hist_hex);
-        let mut model = self.model.borrow_mut();
-        let im_md = model.workspace.converted_images.get_mut(im_id).unwrap();
+        let im_id = self.state.selected_img.as_ref().unwrap();
+        let theta = register_control_points(self.state.atlas_hex, self.state.hist_hex);
+
+        let im_md = self
+            .model
+            .workspace
+            .converted_images
+            .get_mut(im_id)
+            .unwrap();
 
         im_md.state.registration_data = Some(RegistrationData::new(
             theta.unwrap(),
-            self.atlas_orientation,
-            self.slider_pos,
-            self.hist_hex,
-            self.atlas_hex,
+            self.state.atlas_orientation,
+            self.state.slider_pos,
+            self.state.hist_hex,
+            self.state.atlas_hex,
         ));
 
-        model.save_workspace();
-    }
-
-    pub fn render(&mut self, ui: &mut Ui) {
-        register_view::ui_tab_register(self, ui);
+        self.model.save_workspace();
     }
 }

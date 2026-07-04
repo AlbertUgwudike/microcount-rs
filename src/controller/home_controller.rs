@@ -1,9 +1,7 @@
 use std::{
-    cell::RefCell,
     fs,
     io::{self, Error},
     path::Path,
-    rc::Rc,
 };
 
 use eframe::egui::Ui;
@@ -11,25 +9,28 @@ use rfd::FileDialog;
 
 use crate::{
     model::{constants, Model, Workspace},
-    view::ui_tab_home,
+    view::home_view,
 };
 
 pub struct HomeState {
     pub dir_name: String,
 }
 
-pub struct HomeController {
-    model: Rc<RefCell<Model>>,
-    pub state: HomeState,
+impl HomeState {
+    pub fn new(dir_name: String) -> Self {
+        Self { dir_name }
+    }
 }
 
-impl HomeController {
-    pub fn new(model: Rc<RefCell<Model>>) -> HomeController {
-        let state = HomeState {
-            dir_name: model.borrow().get_dir_name().clone(),
-        };
+pub struct HomeController<'a> {
+    model: &'a mut Model,
+    pub state: &'a mut HomeState,
+}
 
-        Self { model, state }
+impl<'a> HomeController<'a> {
+    pub fn render(model: &'a mut Model, state: &'a mut HomeState, ui: &mut Ui) {
+        let mut con = Self { model, state };
+        home_view::ui_tab_home(&mut con, ui);
     }
 
     pub fn load_workspace(&mut self) -> io::Result<()> {
@@ -55,9 +56,8 @@ impl HomeController {
             Err(err) => return Err(Error::new(std::io::ErrorKind::InvalidData, err.to_string())),
         };
 
-        let mut md = self.model.borrow_mut();
-        md.workspace = ws;
-        md.workspace_loaded = true;
+        self.model.workspace = ws;
+        self.model.workspace_loaded = true;
 
         Ok(())
     }
@@ -82,9 +82,5 @@ impl HomeController {
         fs::create_dir(join_path(constants::DIR_DOWN))?;
         fs::create_dir(join_path(constants::DIR_PROC))?;
         fs::create_dir(join_path(constants::DIR_MASK))
-    }
-
-    pub fn render(&mut self, ui: &mut Ui) {
-        ui_tab_home(self, ui);
     }
 }
