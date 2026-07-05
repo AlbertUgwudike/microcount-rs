@@ -86,7 +86,7 @@ impl MyApp {
             home_state: HomeState::new(model.get_dir_name()),
             select_images_state: SelectImagesState::default(),
             register_state: RegisterState::default(),
-            regions_state: RegionsState::default(),
+            regions_state: RegionsState::new(&model.atlas.structure_table),
             model,
         }
     }

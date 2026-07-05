@@ -1,10 +1,13 @@
 use ndarray::array;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::{collections::HashMap, fs};
 use tiff::TiffError;
 
 use crate::algorithm::binary::grad;
 use crate::algorithm::helpers::conv;
+use crate::model::transformation::{Laterality, MaskGenerator};
+use crate::model::{Region, RegionKey};
 use crate::utility::imops::{get_slice, matrix_vec_to_volume};
 use crate::utility::io::read_tiff_region;
 use crate::utility::types::{Matrix, Volume};
@@ -19,6 +22,7 @@ pub struct Atlas {
     size: (usize, usize, usize),
     idx_map: HashMap<u64, Vec<u64>>,
     abr_map: HashMap<String, u64>,
+    pub structure_table: Vec<StructureRow>,
 }
 
 impl Atlas {
@@ -53,6 +57,7 @@ impl Atlas {
             size: (264, 160, 228),
             idx_map: idx_map,
             abr_map: abr_map,
+            structure_table: s_table,
         })
     }
 
@@ -71,6 +76,50 @@ impl Atlas {
             Orientation::Sagittal => get_slice(&self.annotation, idx, 2),
             Orientation::Coronal => get_slice(&self.annotation, idx, 1),
         }
+    }
+
+    pub fn region_image(&self, ori: Orientation, idx: isize, regions: &Vec<Region>) -> Matrix<u16> {
+        let mut ann_img = self.get_annotation_img(ori, idx);
+        let idxs = regions
+            .iter()
+            .filter_map(|r| match &r.mask_generator {
+                MaskGenerator::Atlas {
+                    region_key,
+                    laterality,
+                } => Some(
+                    vec![
+                        vec![(laterality, region_key.to_id())],
+                        self.idx_map
+                            .get(&region_key.to_id())
+                            .unwrap()
+                            .iter()
+                            .map(|v| (laterality, *v))
+                            .collect(),
+                    ]
+                    .concat(),
+                ),
+                MaskGenerator::Whole => None,
+            })
+            .flatten()
+            .collect::<HashSet<(&Laterality, u64)>>();
+
+        let (_, w) = self.size(ori);
+
+        for ((_, c), p) in ann_img.indexed_iter_mut() {
+            let lat = if c < w / 2 {
+                Laterality::Left
+            } else {
+                Laterality::Right
+            };
+
+            if idxs.contains(&(&lat, *p as u64)) {
+                *p = 255
+            } else {
+                *p = 0;
+            }
+        }
+
+        ann_img
     }
 
     pub fn n_slices(&self, ori: Orientation) -> usize {
@@ -129,12 +178,12 @@ impl Atlas {
 }
 
 #[derive(Deserialize, Debug)]
-struct StructureRow {
-    acronym: String,
-    id: u64,
-    name: String,
-    structure_id_path: String,
-    parent_structure_id: f64,
+pub struct StructureRow {
+    pub acronym: String,
+    pub id: u64,
+    pub name: String,
+    pub structure_id_path: String,
+    pub parent_structure_id: f64,
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]

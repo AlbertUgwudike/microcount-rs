@@ -12,7 +12,7 @@ pub struct Workspace {
     pub dir_name: String,
     pub raw_images: HashMap<String, ImageMetadata<Raw>>,
     pub converted_images: HashMap<String, ImageMetadata<Converted>>,
-    pub regions: HashMap<String, Region>,
+    pub regions: HashMap<String, Vec<Region>>,
 }
 
 impl Workspace {

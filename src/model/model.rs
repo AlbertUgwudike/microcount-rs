@@ -8,8 +8,8 @@ use std::{fs, sync::Arc};
 use tokio::sync::mpsc::Sender;
 
 use crate::model::image_metadata::{Converted, Raw, SourceFn};
-use crate::model::transformation::MaskGenerator;
-use crate::model::Region;
+use crate::model::transformation::{Laterality, MaskGenerator};
+use crate::model::{Region, RegionKey};
 use crate::{
     model::{Atlas, ImageMetadata, Workspace},
     ThreadLabel, ThreadResponse,
@@ -97,11 +97,44 @@ impl Model {
         fs::write(folder.join("ws.json"), ws_s).ok();
     }
 
+    pub fn remove_region(&mut self, im_id: &String, rk: &RegionKey, lat: &Laterality) {
+        let v = self
+            .workspace
+            .regions
+            .entry(im_id.clone())
+            .or_insert(vec![]); // <-- ?not required
+
+        let id = rk.to_string().to_string() + &format!("{:?}", lat);
+
+        let i = v.iter().position(|n| n.id == id);
+        if let Some(i) = i {
+            v.remove(i);
+        }
+    }
+
+    pub fn add_region(&mut self, im_id: &String, rk: &RegionKey, laterality: &Laterality) {
+        let region = Region {
+            id: rk.to_string().to_string() + &format!("{:?}", laterality),
+            image_id: im_id.clone(),
+            mask_generator: MaskGenerator::Atlas {
+                region_key: rk.clone(),
+                laterality: laterality.clone(),
+            },
+            needs_reprocess: false,
+        };
+
+        let v = self
+            .workspace
+            .regions
+            .entry(im_id.clone())
+            .or_insert(vec![]);
+
+        v.push(region);
+    }
+
     fn generate_mask(&self, region: &Region) -> Vec<bool> {
         match &region.mask_generator {
             MaskGenerator::Atlas {
-                direction,
-                registration_data,
                 region_key,
                 laterality,
             } => todo!(),

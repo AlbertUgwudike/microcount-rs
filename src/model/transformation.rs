@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::model::{atlas::Orientation, image_metadata::Converted, Atlas, ImageMetadata};
+use crate::model::{atlas::Orientation, RegionKey};
 
 #[derive(Copy, Clone, Serialize, Deserialize, Debug)]
 pub enum Direction {
@@ -47,18 +47,16 @@ impl Direction {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum MaskGenerator {
     Atlas {
-        direction: Direction,
-        registration_data: RegistrationData,
         region_key: RegionKey,
         laterality: Laterality,
     },
     Whole,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct RegistrationData {
     pub affine_matrix: [f32; 6],
     pub orientation: Orientation,
@@ -85,13 +83,7 @@ impl RegistrationData {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub enum RegionKey {
-    AUD,
-    HIP,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug, Hash)]
 pub enum Laterality {
     Left,
     Right,
