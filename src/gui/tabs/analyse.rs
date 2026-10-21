@@ -7,7 +7,7 @@ use crate::core::analysis::{Algorithm, RegionSettings};
 use crate::core::image::{Image, Mask};
 use crate::core::imgproc::morph;
 use crate::core::pipeline::{self, NormCache, Preview};
-use crate::core::tiff::TiffFile;
+use crate::core::imageio::ImageFile;
 use crate::core::workspace::{ProcessStatus, Region};
 use crate::gui::jobs::{Msg, ProcessTask};
 use crate::gui::widgets::{
@@ -442,7 +442,7 @@ fn viewers(app: &mut App, ui: &mut egui::Ui, s: &mut State) {
         s.thumb_for = rid.clone();
         s.wanted.clear();
         s.pages = None;
-        match TiffFile::open(paths.mask_path(&rid)).and_then(|t| t.read_page::<u16>(0)) {
+        match ImageFile::open(paths.mask_path(&rid)).and_then(|t| t.read_plane::<u16>(0, t.rect())) {
             Ok(c) => {
                 s.rect = centred_rect(c[0].w as f64, c[0].h as f64, 0.2);
                 let refs: Vec<&Image<u16>> = c.iter().collect();

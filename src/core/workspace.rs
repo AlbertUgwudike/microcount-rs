@@ -193,6 +193,11 @@ impl Region {
 pub struct ImageEntry {
     pub id: String,
     pub source: PathBuf,
+    /// Series (image) within the source file; Leica projects hold many.
+    #[serde(default)]
+    pub series: usize,
+    #[serde(default)]
+    pub series_name: Option<String>,
     pub status: ConvertStatus,
     #[serde(skip)]
     pub progress: f32,
@@ -214,10 +219,19 @@ pub struct ImageEntry {
 
 impl ImageEntry {
     pub fn new(source: PathBuf) -> Self {
-        let id = source.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        Self::new_series(source, 0, None, false)
+    }
+
+    /// An entry for one series of a file; `multi` adds the series to the id so images
+    /// from the same file stay distinct.
+    pub fn new_series(source: PathBuf, series: usize, series_name: Option<String>, multi: bool) -> Self {
+        let stem = source.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        let id = if multi { format!("{stem}_s{}", series + 1) } else { stem };
         ImageEntry {
             id,
             source,
+            series,
+            series_name,
             status: ConvertStatus::Unconverted,
             progress: 0.0,
             size: [0, 0],
@@ -349,11 +363,24 @@ impl Workspace {
         self.images.iter_mut().find(|i| i.id == id)
     }
 
+    /// Display name: file name, plus the series name for multi-image files.
+    pub fn display_name(img: &ImageEntry) -> String {
+        let file = img.source.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+        match &img.series_name {
+            Some(n) => format!("{file} — {n}"),
+            None => file,
+        }
+    }
+
     /// Adds images, skipping file names already present (`io_add_image`).
     pub fn add_images(&mut self, paths: &[PathBuf]) -> Vec<String> {
+        self.add_entries(paths.iter().map(|p| ImageEntry::new(p.clone())).collect())
+    }
+
+    /// Adds entries whose ids are not already present; returns the skipped ids.
+    pub fn add_entries(&mut self, entries: Vec<ImageEntry>) -> Vec<String> {
         let mut skipped = vec![];
-        for p in paths {
-            let entry = ImageEntry::new(p.clone());
+        for entry in entries {
             if self.images.iter().any(|i| i.id == entry.id) {
                 skipped.push(entry.id);
             } else {

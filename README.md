@@ -17,13 +17,30 @@ cargo run --release
 
 Requirements:
 
-- A Rust toolchain (1.80+).
+- A Rust toolchain (1.85+).
 - The Allen CCF atlas files in `assets/` (`annotation.tiff`, `reference.tiff`, `structures.csv`), included in the repository.
-- Java, to import non-TIFF formats (`.lif`, `.lof`, `.czi`, …) through the bundled Bio-Formats converter `convert/convert.jar`. TIFF files are read directly and don't need Java.
 
-The app looks for `assets/` and `convert/convert.jar` next to the executable, in a macOS
-bundle's `Resources`, in the working directory and its parent, and in the repository root. Set
-`MICROCOUNT_HOME` to the folder that contains them when installing elsewhere.
+No Java is needed. Images are read and converted by
+[`ome-bioformats-rs`](https://github.com/AlbertUgwudike/ome-bioformats-rs), a Rust port
+of OME Bio-Formats, which this project uses as a dependency. Every format that crate
+can read can be imported (currently Leica LIF and LOF, and TIFF / BigTIFF / OME-TIFF),
+and formats added to it become importable here without changes to Microcount. The
+Home tab lists the formats the build supports.
+
+The app looks for `assets/` next to the executable, in a macOS bundle's `Resources`, in
+the working directory and its parent, and in the repository root. Set `MICROCOUNT_HOME`
+to the folder that contains it when installing elsewhere.
+
+### Developing against a local `ome-bioformats-rs`
+
+`Cargo.toml` depends on the GitHub repository. To build against a checkout next to
+this one instead (so changes there are picked up immediately), create
+`.cargo/config.toml`, which is git-ignored:
+
+```toml
+[patch."https://github.com/AlbertUgwudike/ome-bioformats-rs"]
+bioformats = { path = "../ome-bioformats-rs/crates/bioformats" }
+```
 
 ### Headless use
 
@@ -41,11 +58,11 @@ processing → CSV) without the GUI.
 
 | Path | Contents |
 | --- | --- |
-| `src/core/tiff.rs` | (Big)TIFF reader that decodes only the strips/tiles under a requested region (LZW, Deflate, PackBits, predictors). Also a streaming writer. |
+| `src/core/imageio.rs` | The only place that touches the `bioformats` crate. It maps Microcount's channels onto Bio-Formats series, planes and samples, reads regions and subsampled overviews, and streams 16-bit TIFF output. |
 | `src/core/imgproc/` | Equivalents of the Image Processing Toolbox functions used: `log_norm`, `mat2gray`, `stretchlim`/`imadjust`, `pacefilt`, disk morphology, labelling, `imfill`, `bwperim`, `bwskel`, CLAHE, `wiener2`, `medfilt2`, convex hulls. |
 | `src/core/analysis/` | The six algorithms (`algorithms.rs`), the shared cell pipeline — flood fill, convexity, branches, branch lengths, Scholl (`cells.rs`) — `data2result` (`data.rs`) and output images (`render.rs`). |
 | `src/core/atlas.rs`, `registration.rs` | Atlas slicing and warping, region masks, control-point and automatic registration. |
-| `src/core/workspace.rs`, `pipeline.rs`, `convert.rs` | Workspace model, per-region processing, preview and export, image import. |
+| `src/core/workspace.rs`, `pipeline.rs`, `convert.rs` | Workspace model, per-region processing, preview and export, and image import. Import converts each image with the `bioformats` reader and writer in process, in parallel chunks, with progress and cancellation. |
 | `src/gui/` | egui front end. Long work runs on background threads that report back over a channel. |
 
 ## Validation against MATLAB
@@ -98,6 +115,11 @@ These are bug fixes or improvements. Results that depend on them will differ fro
   `imregtform` and gives a much closer starting point for the control-point step.
 - **Rotating an image or changing atlas orientation** resets its alignment instead of
   leaving a transform that no longer fits.
+- **Import** runs in process through the Rust Bio-Formats port instead of a Java
+  subprocess. A 254 MB Leica `.lof` converts in 0.3 s (10.6 s with the Java converter),
+  pixel-identical. Files holding several images, such as Leica projects, are added as
+  one workspace image per series. Unreadable files are reported when added, not at
+  conversion.
 - **Workspaces** are stored as `ws.json`, with the same `ws_converted`, `ws_downsampled`,
   `ws_processed`, `ws_masks` and `ws_scholl` folders. MATLAB `ws.mat` workspaces can't be
   opened: create a new workspace and re-add the images (already-converted TIFFs are

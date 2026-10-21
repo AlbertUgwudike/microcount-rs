@@ -2,7 +2,7 @@
 //! process -> export.
 use microcount::core::analysis::Algorithm;
 use microcount::core::atlas::Atlas;
-use microcount::core::convert::{self, Converter};
+use microcount::core::convert;
 use microcount::core::registration::auto_register;
 use microcount::core::workspace::*;
 use microcount::core::{pipeline, Cancel};
@@ -18,16 +18,15 @@ fn main() -> anyhow::Result<()> {
     ws.add_images(&[src.clone()]);
     let paths = ws.paths();
     let atlas = Atlas::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"))?;
-    let conv = Converter { java: convert::find_java(), jar: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("convert/convert.jar"), heap: "8g".into() };
     let img = &mut ws.images[0];
-    let md = convert::import(&conv, &src, &paths.conv_path(&img.id), &paths.down_path(&img.id), &Cancel::default(), &|p| eprint!("\r{p:.0}%  "))?;
+    let md = convert::import(&src, 0, &paths.conv_path(&img.id), &paths.down_path(&img.id), &Cancel::default(), &|p| eprint!("\r{p:.0}%  "))?;
     println!("imported {:?} down {:?} ch {} px {:?} [{:.1}s]", md.size, md.down_size, md.channel_count, md.pixel_dims, t.elapsed().as_secs_f64());
     img.status = ConvertStatus::Converted; img.size = md.size; img.down_size = md.down_size; img.channel_count = md.channel_count; img.set_default_channels();
     img.pixel_dims = md.pixel_dims.unwrap_or([1.0, 1.0]);
     let ori = Orientation::Axial;
     let mut td = TransformData::default_for(img.down_size, atlas.slice_size(ori), atlas.n_slices(ori), Direction::North, ori);
     td.slice_idx = args.get(4).map(|s| s.parse().unwrap()).unwrap_or(td.slice_idx);
-    let tf = microcount::core::tiff::TiffFile::open(paths.down_path(&img.id))?;
+    let tf = microcount::core::imageio::ImageFile::open(paths.down_path(&img.id))?;
     let hist = tf.read_channel(img.registration_channel - 1, microcount::core::image::Rect::new(0, 0, img.down_size[1], img.down_size[0]))?.pad(PAD, 0);
     let t1 = Instant::now();
     td.matrix = auto_register(&atlas.reference_slice(ori, td.slice_idx), &hist)?.0;

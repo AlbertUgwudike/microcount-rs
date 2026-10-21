@@ -7,7 +7,6 @@ mod tabs;
 pub mod widgets;
 
 use crate::core::atlas::Atlas;
-use crate::core::convert::{find_java, Converter};
 use crate::core::workspace::{ConvertStatus, ProcessStatus, Workspace};
 use jobs::{Jobs, Msg};
 use std::path::{Path, PathBuf};
@@ -27,8 +26,8 @@ pub struct App {
     pub atlas: Option<Arc<Atlas>>,
     pub atlas_status: String,
     pub assets: Option<PathBuf>,
-    pub converter: Converter,
-    pub java_version: Result<String, String>,
+    /// Formats the bioformats crate can import.
+    pub formats: Vec<&'static str>,
     pub tab: Tab,
     pub jobs: Jobs,
     log: log::LogBuffer,
@@ -52,7 +51,7 @@ struct Shots {
     waiting: bool,
 }
 
-/// Directories searched for `assets/` (atlas volumes) and `convert/convert.jar`.
+/// Directories searched for `assets/` (atlas volumes).
 fn search_roots() -> Vec<PathBuf> {
     let mut roots = vec![];
     if let Ok(p) = std::env::var("MICROCOUNT_HOME") {
@@ -82,21 +81,11 @@ fn find_assets() -> Option<PathBuf> {
     search_roots().into_iter().map(|r| r.join("assets")).find(|a| a.join("annotation.tiff").is_file())
 }
 
-fn find_jar() -> PathBuf {
-    search_roots()
-        .into_iter()
-        .map(|r| r.join("convert").join("convert.jar"))
-        .find(|j| j.is_file())
-        .unwrap_or_else(|| PathBuf::from("convert/convert.jar"))
-}
-
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, log: log::LogBuffer) -> Self {
         log::set_context(&cc.egui_ctx);
         let jobs = Jobs::new(cc.egui_ctx.clone());
         let assets = find_assets();
-        let converter = Converter { java: find_java(), jar: find_jar(), heap: "8g".into() };
-        let java_version = converter.check_java().map_err(|e| format!("{e:#}"));
         let atlas_status = match &assets {
             Some(dir) => {
                 let dir = dir.clone();
@@ -116,8 +105,7 @@ impl App {
             atlas: None,
             atlas_status,
             assets,
-            converter,
-            java_version,
+            formats: crate::core::imageio::readable_formats(),
             tab: Tab::Home,
             jobs,
             log,

@@ -41,14 +41,8 @@ pub fn ui(app: &mut App, ui: &mut egui::Ui) {
             ui.label("Atlas");
             ui.label(&app.atlas_status);
             ui.end_row();
-            ui.label("Java");
-            match &app.java_version {
-                Ok(v) => ui.label(v),
-                Err(e) => ui.colored_label(egui::Color32::from_rgb(230, 120, 80), format!("{e} — only TIFF images can be imported")),
-            };
-            ui.end_row();
-            ui.label("Converter");
-            ui.label(app.converter.jar.display().to_string());
+            ui.label("Import formats");
+            ui.label(app.formats.join(", ")).on_hover_text("Provided by the bioformats crate (Rust port of OME Bio-Formats)");
             ui.end_row();
             ui.label("Worker threads");
             ui.label(rayon::current_num_threads().to_string());

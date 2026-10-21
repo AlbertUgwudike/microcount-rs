@@ -4,10 +4,10 @@ pub mod analysis;
 pub mod atlas;
 pub mod convert;
 pub mod image;
+pub mod imageio;
 pub mod imgproc;
 pub mod pipeline;
 pub mod registration;
-pub mod tiff;
 pub mod workspace;
 
 use std::sync::atomic::{AtomicBool, Ordering};

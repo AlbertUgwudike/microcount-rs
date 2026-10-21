@@ -8,7 +8,7 @@ use crate::core::analysis::render::{Renderer, PAGE_CELL, PAGE_CELL_POLY, PAGE_CO
 use crate::core::analysis::{Algorithm, Settings};
 use crate::core::atlas::{upscale_mask, Atlas};
 use crate::core::image::{apply_mask, Image, Mask, Rect};
-use crate::core::tiff::{self, TiffFile};
+use crate::core::imageio::{self, ImageFile};
 use crate::core::workspace::{ImageEntry, Region, WsPaths};
 use crate::core::Cancel;
 use anyhow::{anyhow, bail, Context, Result};
@@ -57,7 +57,7 @@ pub fn full_mask(atlas: &Atlas, img: &ImageEntry, region: &Region) -> Result<Ful
 pub fn write_mask_thumbnail(paths: &WsPaths, atlas: &Atlas, img: &ImageEntry, region: &Region) -> Result<Rect> {
     let dn = dn_mask(atlas, img, region)?;
     let bbox = dn.bbox().ok_or_else(|| anyhow!("region {} does not intersect this section", region.key))?;
-    let down = TiffFile::open(paths.down_path(&img.id))?;
+    let down = ImageFile::open(paths.down_path(&img.id))?;
     let mask = dn.crop(bbox);
     let chan = |c: usize| -> Result<Image<u16>> {
         let mut m = down.read_channel(c.saturating_sub(1), bbox)?;
@@ -67,7 +67,7 @@ pub fn write_mask_thumbnail(paths: &WsPaths, atlas: &Atlas, img: &ImageEntry, re
     let cell = chan(img.cell_channel)?;
     let co = chan(img.co_channel)?;
     let zero = Image::filled(bbox.w, bbox.h, 0u16);
-    tiff::write_pages(paths.mask_path(&region.id(&img.id)), &[vec![&cell, &co, &zero]])?;
+    imageio::write_pages(&paths.mask_path(&region.id(&img.id)), &[vec![&cell, &co, &zero]], None)?;
     Ok(bbox)
 }
 
@@ -83,17 +83,17 @@ pub fn thumb_to_crop(img: &ImageEntry, dn_rect: Rect, crop: Rect, t: [f64; 4]) -
     fm.thumb_to_full(t[0], t[1], t[2], t[3])
 }
 
-pub fn load_input(algo: Algorithm, tf: &TiffFile, img: &ImageEntry, rect: Rect, mask: Mask) -> Result<RegionInput> {
+pub fn load_input(algo: Algorithm, tf: &ImageFile, img: &ImageEntry, rect: Rect, mask: Mask) -> Result<RegionInput> {
     let needs = algo.needs();
     let n_pixels = mask.count();
     let read = |c: usize| tf.read_channel(c.saturating_sub(1), rect);
     Ok(RegionInput {
         cell: if needs.cell { Some(read(img.cell_channel)?) } else { None },
         co: if needs.co { Some(read(img.co_channel)?) } else { None },
-        rgb: if needs.rgb { Some(tf.read_region::<u16>(0, rect)?) } else { None },
+        rgb: if needs.rgb { Some(tf.read_plane::<u16>(0, rect)?) } else { None },
         mask,
         n_pixels,
-        full_range: if tf.pages[0].bps == 8 { 255 } else { 65535 },
+        full_range: tf.full_range(),
     })
 }
 
@@ -122,7 +122,7 @@ pub fn process_region(
     let t0 = Instant::now();
     let rid = region.id(&img.id);
     let fm = full_mask(atlas, img, region)?;
-    let tf = TiffFile::open(paths.conv_path(&img.id))?;
+    let tf = ImageFile::open(paths.conv_path(&img.id))?;
     log::info!("{rid}: {}×{} px crop, {} px in region", fm.rect.w, fm.rect.h, fm.mask.count());
     let fm_rect = fm.rect;
     let input = load_input(algo, &tf, img, fm.rect, fm.mask)?;
@@ -137,7 +137,7 @@ pub fn process_region(
         drop(data);
         let (res_out, tables_out) = summarise(&outside, img.pixel_dims);
         write_tables(&tables_out, &suffixed(&scholl_path, "_out_plaque"))?;
-        Renderer::new(&outside).write_tiff(&suffixed(&proc_path, "_out_plaque"))?;
+        Renderer::new(&outside).write_tiff(&suffixed(&proc_path, "_out_plaque"), img.pixel_dims)?;
         (inside, Some(res_out))
     } else {
         (data, None)
@@ -145,7 +145,7 @@ pub fn process_region(
     let (result, tables) = summarise(&main, img.pixel_dims);
     write_tables(&tables, &scholl_path).context("writing tables")?;
     cancel.check()?;
-    Renderer::new(&main).write_tiff(&proc_path).context("writing output image")?;
+    Renderer::new(&main).write_tiff(&proc_path, img.pixel_dims).context("writing output image")?;
     Ok(RegionOutcome { crop: fm_rect, result, result_out_plaque, seconds: t0.elapsed().as_secs_f64() })
 }
 
@@ -190,7 +190,7 @@ pub fn preview(
 ) -> Result<(Preview, NormCache)> {
     let fm = full_mask(atlas, img, region)?;
     let rel = fm.thumb_to_full(thumb[0], thumb[1], thumb[2], thumb[3]);
-    let tf = TiffFile::open(paths.conv_path(&img.id))?;
+    let tf = ImageFile::open(paths.conv_path(&img.id))?;
     let key = norm_key(img, region, algo);
     let cache = match cache {
         Some(c) if c.key == key => c,
@@ -224,16 +224,15 @@ pub fn preview(
 
 /// Reads the view pages of a processed region's output image inside `rel`.
 pub fn read_processed(paths: &WsPaths, region_id: &str, rel: Rect) -> Result<Vec<[Image<u16>; 3]>> {
-    let tf = TiffFile::open(paths.proc_path(region_id))?;
-    let p = &tf.pages[0];
-    let rel = rel.intersect(&Rect::new(0, 0, p.width, p.height));
+    let tf = ImageFile::open(paths.proc_path(region_id))?;
+    let rel = rel.intersect(&tf.rect());
     if rel.is_empty() {
         bail!("view outside processed image");
     }
     VIEW_PAGES
         .iter()
         .map(|&page| {
-            let mut c = tf.read_region::<u16>(page, rel)?;
+            let mut c = tf.read_plane::<u16>(page, rel)?;
             if c.len() < 3 {
                 let z = c[0].clone();
                 c.resize(3, z);
@@ -295,7 +294,7 @@ pub fn export_csv(paths: &WsPaths, rows: &[(&ImageEntry, &Region)], path: &Path)
 pub fn export_regions(paths: &WsPaths, atlas: &Atlas, images: &[ImageEntry], dir: &Path, cancel: &Cancel) -> Result<usize> {
     let mut n = 0;
     for img in images {
-        let tf = TiffFile::open(paths.conv_path(&img.id))?;
+        let tf = ImageFile::open(paths.conv_path(&img.id))?;
         for region in &img.regions {
             cancel.check()?;
             let fm = full_mask(atlas, img, region)?;
@@ -306,7 +305,7 @@ pub fn export_regions(paths: &WsPaths, atlas: &Atlas, images: &[ImageEntry], dir
             };
             let (cell, co, reg) = (read(img.cell_channel)?, read(img.co_channel)?, read(img.registration_channel)?);
             let out = dir.join(format!("{}.tiff", region.id(&img.id)));
-            tiff::write_pages(&out, &[vec![&cell, &co, &reg]])?;
+            imageio::write_pages(&out, &[vec![&cell, &co, &reg]], Some(img.pixel_dims))?;
             log::info!("exported {}", out.display());
             n += 1;
         }

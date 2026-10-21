@@ -1,2 +1,4 @@
 /target
 .DS_Store
+# Local override pointing bioformats at ../ome-bioformats-rs (see README)
+/.cargo/config.toml

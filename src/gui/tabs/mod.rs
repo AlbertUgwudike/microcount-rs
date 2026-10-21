@@ -5,15 +5,14 @@ pub mod register;
 pub mod select;
 
 use crate::core::image::Image;
-use crate::core::tiff::TiffFile;
+use crate::core::imageio::ImageFile;
 use anyhow::Result;
 use std::path::Path;
 
 /// Reads one channel (1-based) of the downsampled image.
 pub fn read_down(path: &Path, ch: usize) -> Result<Image<u16>> {
-    let tf = TiffFile::open(path)?;
-    let p = &tf.pages[0];
-    tf.read_channel(ch.saturating_sub(1), crate::core::image::Rect::new(0, 0, p.width, p.height))
+    let f = ImageFile::open(path)?;
+    f.read_channel(ch.saturating_sub(1), f.rect())
 }
 
 pub fn fmt(v: f64) -> String {

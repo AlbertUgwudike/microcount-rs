@@ -3,7 +3,7 @@
 
 use crate::core::image::{Image, Mask};
 use crate::core::registration::Affine;
-use crate::core::tiff::TiffFile;
+use crate::core::imageio::{ImageFile, Sample};
 use crate::core::workspace::{Direction, Laterality, Orientation, TransformData, PAD};
 use anyhow::{anyhow, bail, Context, Result};
 use rayon::prelude::*;
@@ -35,12 +35,12 @@ pub struct Atlas {
 /// Region key of the whole image (no atlas mask).
 pub const WHOLE_IMAGE: &str = "WI";
 
-fn read_volume<T: crate::core::tiff::Sample>(path: &Path) -> Result<(usize, usize, usize, Vec<T>)> {
-    let tf = TiffFile::open(path)?;
-    let (w, h, d) = (tf.pages[0].width, tf.pages[0].height, tf.pages.len());
+fn read_volume<T: Sample>(path: &Path) -> Result<(usize, usize, usize, Vec<T>)> {
+    let f = ImageFile::open(path)?;
+    let (w, h, d) = (f.width(), f.height(), f.planes());
     let pages: Vec<Vec<T>> = (0..d)
         .into_par_iter()
-        .map(|p| Ok(tf.read_page::<T>(p)?.swap_remove(0).data))
+        .map(|p| Ok(f.read_plane::<T>(p, f.rect())?.swap_remove(0).data))
         .collect::<Result<_>>()?;
     Ok((w, h, d, pages.concat()))
 }

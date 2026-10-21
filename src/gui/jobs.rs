@@ -2,7 +2,7 @@
 //! and report back through a channel that the UI drains every frame, so the workspace is
 //! only ever mutated on the UI thread.
 
-use crate::core::convert::{Converter, Metadata};
+use crate::core::convert::Metadata;
 use crate::core::image::Image;
 use crate::core::pipeline::{NormCache, Preview, RegionOutcome};
 use crate::core::registration::Affine;
@@ -73,9 +73,9 @@ impl<T: Send + 'static> WorkQueue<T> {
 pub struct ConvertTask {
     pub id: String,
     pub source: std::path::PathBuf,
+    pub series: usize,
     pub conv: std::path::PathBuf,
     pub down: std::path::PathBuf,
-    pub converter: Converter,
     pub cancel: Cancel,
 }
 
@@ -150,7 +150,7 @@ impl Jobs {
                     Err("cancelled".into())
                 } else {
                     log::info!("converting {}", t.source.display());
-                    crate::core::convert::import(&t.converter, &t.source, &t.conv, &t.down, &t.cancel, &progress)
+                    crate::core::convert::import(&t.source, t.series, &t.conv, &t.down, &t.cancel, &progress)
                         .map_err(|e| err_string(&e))
                 };
                 tx.send(Msg::ConvertDone { id, result }).ok();

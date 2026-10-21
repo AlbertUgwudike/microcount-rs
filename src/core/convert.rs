@@ -1,15 +1,21 @@
-//! Image import: conversion to TIFF through the bundled Bio-Formats converter
-//! (`lof2tiff.m`), the 1/20 downsampled registration image (`bg_down_img`) and image
-//! metadata (`set_metadata`).
+//! Image import (`lof2tiff.m`, `bg_conv_img`, `bg_down_img`, `set_metadata`): convert a
+//! microscopy file to a workspace TIFF with the `bioformats` crate, write the 1/20
+//! downsampled registration image, and read the image metadata.
+//!
+//! Every format the `bioformats` crate can read can be imported; nothing here lists
+//! formats.
 
+use crate::core::imageio::{self, ImageFile};
 use crate::core::imgproc::stats::imadjust_u16;
-use crate::core::tiff::{self, TiffFile};
 use crate::core::workspace::DOWNSAMPLE;
 use crate::core::Cancel;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
+use bioformats::convert::output_core;
+use bioformats::pixel::{interleave, swap_endianness};
+use bioformats::reader::Region;
+use bioformats::{OmeMetadata, WriterOptions};
+use rayon::prelude::*;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct Metadata {
@@ -19,152 +25,127 @@ pub struct Metadata {
     pub pixel_dims: Option<[f64; 2]>,
 }
 
-/// Where to find `java` and the converter jar.
-#[derive(Clone, Debug)]
-pub struct Converter {
-    pub java: PathBuf,
-    pub jar: PathBuf,
-    /// Maximum JVM heap, e.g. `8g`.
-    pub heap: String,
+/// Raw pixel data read, normalised and encoded per batch.
+const BATCH_BYTES: usize = 128 << 20;
+
+fn temp_path(dst: &Path) -> PathBuf {
+    let name = dst.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    dst.with_file_name(format!(".partial_{name}"))
 }
 
-impl Converter {
-    pub fn check_java(&self) -> Result<String> {
-        let out = Command::new(&self.java)
-            .arg("-version")
-            .output()
-            .with_context(|| format!("could not run '{}' — is Java installed?", self.java.display()))?;
-        let text = String::from_utf8_lossy(&out.stderr);
-        Ok(text.lines().next().unwrap_or("java").to_string())
+/// Converts one series of `src` to the TIFF `dst`, streaming chunks of each plane
+/// through the reader and writer in parallel. Reports progress in percent and stops
+/// promptly when cancelled.
+pub fn convert_series(src: &Path, series: usize, dst: &Path, cancel: &Cancel, progress: &dyn Fn(f32)) -> Result<()> {
+    let reader = bioformats::open(src).with_context(|| format!("opening {}", src.display()))?;
+    let in_core = reader.series().get(series).ok_or_else(|| anyhow!("{} has no series {}", src.display(), series + 1))?.clone();
+    let out_core = output_core(&in_core);
+    let meta = OmeMetadata {
+        images: vec![reader.metadata().images.get(series).cloned().unwrap_or_default()],
+        global_metadata: reader.metadata().global_metadata.clone(),
+    };
+    if let Some(dir) = dst.parent() {
+        std::fs::create_dir_all(dir)?;
     }
-
-    /// Runs the converter, reporting progress as output size / input size.
-    fn run_java(&self, src: &Path, dst: &Path, cancel: &Cancel, progress: &dyn Fn(f32)) -> Result<()> {
-        if !self.jar.is_file() {
-            bail!("converter not found at {}", self.jar.display());
-        }
-        let total = std::fs::metadata(src)?.len().max(1) as f32;
-        std::fs::remove_file(dst).ok();
-        let mut child = Command::new(&self.java)
-            .arg(format!("-Xmx{}", self.heap))
-            .arg("-jar")
-            .arg(&self.jar)
-            .arg(src)
-            .arg(dst)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("could not start '{}' — is Java installed?", self.java.display()))?;
-        // Drain the pipes so the converter never blocks on a full buffer.
-        let drain = |r: Option<Box<dyn std::io::Read + Send>>| {
-            std::thread::spawn(move || {
-                let mut s = String::new();
-                if let Some(mut r) = r {
-                    r.read_to_string(&mut s).ok();
+    let tmp = temp_path(dst);
+    let options = WriterOptions { original_metadata: false, ..Default::default() };
+    let mut writer = bioformats::create_writer(&tmp, std::slice::from_ref(&out_core), &meta, &options).map_err(|e| anyhow!("{e}"))?;
+    let result = (|| -> Result<()> {
+        let chunks = writer.plane_chunks(0);
+        let chunk_bytes = chunks.first().map_or(1, |r| in_core.region_bytes(r.w, r.h)).max(1);
+        let batch = (BATCH_BYTES / chunk_bytes).max(rayon::current_num_threads()).max(1);
+        let total = (in_core.plane_bytes() as f64 * in_core.image_count as f64).max(1.0);
+        let mut done = 0f64;
+        let (samples, bytes) = (in_core.rgb_channel_count.max(1) as usize, in_core.pixel_type.bytes());
+        for plane in 0..in_core.image_count {
+            for (bi, group) in chunks.chunks(batch).enumerate() {
+                cancel.check()?;
+                let encoded: Vec<Vec<u8>> = group
+                    .par_iter()
+                    .map(|r: &Region| {
+                        let mut buf = vec![0u8; in_core.region_bytes(r.w, r.h)];
+                        reader.open_bytes(series, plane, *r, &mut buf).map_err(|e| anyhow!("{e}"))?;
+                        if samples > 1 && !in_core.interleaved {
+                            let mut out = vec![0u8; buf.len()];
+                            interleave(&buf, &mut out, samples, bytes);
+                            buf = out;
+                        }
+                        if !in_core.little_endian && bytes > 1 {
+                            swap_endianness(&mut buf, bytes);
+                        }
+                        writer.encode_chunk(0, *r, buf).map_err(|e| anyhow!("{e}"))
+                    })
+                    .collect::<Result<_>>()?;
+                for (k, e) in encoded.iter().enumerate() {
+                    writer.write_chunk(0, plane, bi * batch + k, e).map_err(|e| anyhow!("{e}"))?;
                 }
-                s
-            })
-        };
-        let out = drain(child.stdout.take().map(|r| Box::new(r) as _));
-        let err = drain(child.stderr.take().map(|r| Box::new(r) as _));
-        let status = loop {
-            if cancel.is_cancelled() {
-                child.kill().ok();
-                child.wait().ok();
-                std::fs::remove_file(dst).ok();
-                return Err(crate::core::Cancelled.into());
+                done += group.iter().map(|r| in_core.region_bytes(r.w, r.h) as f64).sum::<f64>();
+                progress((done / total * 100.0).min(99.0) as f32);
             }
-            if let Some(s) = child.try_wait()? {
-                break s;
-            }
-            if let Ok(m) = std::fs::metadata(dst) {
-                progress((m.len() as f32 / total * 100.0).min(99.0));
-            }
-            std::thread::sleep(Duration::from_millis(500));
-        };
-        let (out, err) = (out.join().unwrap_or_default(), err.join().unwrap_or_default());
-        for line in out.lines().chain(err.lines()).filter(|l| !l.trim().is_empty()) {
-            log::debug!("[bioformats] {line}");
-        }
-        let failed = !status.success() || TiffFile::open(dst).is_err();
-        if failed {
-            let tail: Vec<&str> = err.lines().chain(out.lines()).filter(|l| !l.trim().is_empty()).collect();
-            let tail = tail[tail.len().saturating_sub(5)..].join("\n");
-            bail!("conversion failed for {}\n{tail}", src.display());
         }
         Ok(())
-    }
-
-    /// Produces the workspace TIFF for `src` (`bg_conv_img`). TIFFs are copied when they
-    /// can be read directly; everything else goes through Bio-Formats.
-    pub fn convert(&self, src: &Path, dst: &Path, cancel: &Cancel, progress: &dyn Fn(f32)) -> Result<()> {
-        if let Some(dir) = dst.parent() {
-            std::fs::create_dir_all(dir)?;
+    })();
+    match result {
+        Ok(()) => {
+            writer.finish().map_err(|e| anyhow!("{e}"))?;
+            std::fs::rename(&tmp, dst)?;
+            Ok(())
         }
-        let ext = src.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-        if matches!(ext.as_str(), "tif" | "tiff") {
-            match TiffFile::open(src).and_then(|t| t.pages.iter().try_for_each(|p| p.supported())) {
-                Ok(()) => {
-                    std::fs::copy(src, dst).with_context(|| format!("copying {}", src.display()))?;
-                    return Ok(());
+        Err(e) => {
+            drop(writer);
+            std::fs::remove_file(&tmp).ok();
+            Err(e)
+        }
+    }
+}
+
+/// Produces the workspace TIFF for series `series` of `src`. Single-image TIFFs are
+/// copied (a copy-on-write clone where the file system supports it); everything else
+/// is converted.
+pub fn convert(src: &Path, series: usize, dst: &Path, cancel: &Cancel, progress: &dyn Fn(f32)) -> Result<()> {
+    let ext = src.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if matches!(ext.as_str(), "tif" | "tiff") && series == 0 {
+        if let Ok((_, s)) = imageio::probe(src) {
+            if s.len() == 1 {
+                if let Some(dir) = dst.parent() {
+                    std::fs::create_dir_all(dir)?;
                 }
-                Err(e) => log::info!("{}: {e}; converting with Bio-Formats", src.display()),
+                std::fs::copy(src, dst).with_context(|| format!("copying {}", src.display()))?;
+                return Ok(());
             }
         }
-        self.run_java(src, dst, cancel, progress)
     }
+    convert_series(src, series, dst, cancel, progress)
 }
 
 /// Writes the downsampled image: every channel subsampled ×20 and contrast-adjusted,
 /// one page per channel. Unlike the MATLAB version all channels are kept, so any
 /// channel can serve for registration.
 pub fn downsample(conv: &Path, down: &Path) -> Result<()> {
-    let tf = TiffFile::open(conv)?;
-    let p0 = &tf.pages[0];
-    let channels: Vec<_> = if p0.spp == 1 {
-        (0..tf.pages.len())
-            .map(|i| Ok(tf.read_subsampled(i, DOWNSAMPLE)?.swap_remove(0)))
-            .collect::<Result<_>>()?
-    } else {
-        tf.read_subsampled(0, DOWNSAMPLE)?
-    };
-    let adjusted: Vec<_> = channels.iter().map(imadjust_u16).collect();
-    let pages: Vec<Vec<_>> = adjusted.iter().map(|c| vec![c]).collect();
-    tiff::write_pages(down, &pages)
+    let f = ImageFile::open(conv)?;
+    let channels: Vec<_> = (0..f.channel_count())
+        .map(|c| Ok(imadjust_u16(&f.read_subsampled(c, DOWNSAMPLE)?)))
+        .collect::<Result<_>>()?;
+    let pages: Vec<Vec<_>> = channels.iter().map(|c| vec![c]).collect();
+    imageio::write_pages(down, &pages, None)
 }
 
 pub fn read_metadata(conv: &Path, down: &Path) -> Result<Metadata> {
-    let tf = TiffFile::open(conv)?;
-    let dn = TiffFile::open(down)?;
-    let p = &tf.pages[0];
+    let f = ImageFile::open(conv)?;
+    let d = ImageFile::open(down)?;
     Ok(Metadata {
-        size: [p.height, p.width],
-        down_size: [dn.pages[0].height, dn.pages[0].width],
-        channel_count: tf.channel_count(),
-        pixel_dims: tf.pixel_size_um(),
+        size: [f.height(), f.width()],
+        down_size: [d.height(), d.width()],
+        channel_count: f.channel_count(),
+        pixel_dims: f.pixel_size_um(),
     })
 }
 
-/// Full import of one image.
-pub fn import(conv: &Converter, src: &Path, conv_path: &Path, down_path: &Path, cancel: &Cancel, progress: &dyn Fn(f32)) -> Result<Metadata> {
-    conv.convert(src, conv_path, cancel, progress)?;
+/// Full import of one series of an image.
+pub fn import(src: &Path, series: usize, conv_path: &Path, down_path: &Path, cancel: &Cancel, progress: &dyn Fn(f32)) -> Result<Metadata> {
+    convert(src, series, conv_path, cancel, progress)?;
     cancel.check()?;
     progress(99.0);
     downsample(conv_path, down_path).context("downsampling")?;
     read_metadata(conv_path, down_path)
-}
-
-/// Locates `java`: `JAVA_HOME`, then `PATH`.
-pub fn find_java() -> PathBuf {
-    if let Ok(home) = std::env::var("JAVA_HOME") {
-        let p = Path::new(&home).join("bin").join(if cfg!(windows) { "java.exe" } else { "java" });
-        if p.is_file() {
-            return p;
-        }
-    }
-    PathBuf::from("java")
-}
-
-pub fn not_found(what: &str) -> anyhow::Error {
-    anyhow!("{what} not found")
 }

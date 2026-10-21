@@ -8,7 +8,7 @@
 use super::data::Data;
 use crate::core::image::{Image, Mask, Rect};
 use crate::core::imgproc::{label, stats};
-use crate::core::tiff::TiffWriter;
+use crate::core::imageio;
 use anyhow::Result;
 use std::path::Path;
 
@@ -102,14 +102,10 @@ impl<'a> Renderer<'a> {
         }
     }
 
-    pub fn write_tiff(&self, path: &Path) -> Result<()> {
+    /// Writes all pages as one multi-page RGB TIFF. `pixel_um` is `[height, width]`.
+    pub fn write_tiff(&self, path: &Path, pixel_um: [f64; 2]) -> Result<()> {
         let (w, h) = self.size();
-        let bytes = (w * h * 3 * 2 * N_PAGES) as u64;
-        let mut tw = TiffWriter::create(path, TiffWriter::needs_big(bytes))?;
-        for page in 0..N_PAGES {
-            tw.write_page(w, h, 3, |y, row| self.row(page, y, row))?;
-        }
-        tw.finish()
+        imageio::write_tiff(path, w, h, 3, N_PAGES, Some(pixel_um), |page, y, row| self.row(page, y, row))
     }
 
     /// Materialises `rect` of a page as three channel images (used for previews).

@@ -5,7 +5,8 @@ use super::read_down;
 use crate::core::convert;
 use crate::core::image::{Image, Rect};
 use crate::core::imgproc::stats::imadjust_u16;
-use crate::core::tiff::TiffFile;
+use crate::core::imageio::{self, ImageFile};
+use crate::core::workspace::{ImageEntry, Workspace};
 use crate::core::workspace::ConvertStatus;
 use crate::gui::jobs::{ConvertTask, Msg};
 use crate::gui::widgets::{
@@ -66,7 +67,7 @@ fn request_view(app: &mut App, s: &mut State, id: &str) {
     s.view_req = app.jobs.request_id();
     let req = s.view_req;
     app.jobs.spawn(move || {
-        let result = TiffFile::open(&path)
+        let result = ImageFile::open(&path)
             .and_then(|tf| tf.read_channel(ch, rect))
             .map(|c| {
                 let a = imadjust_u16(&c);
@@ -102,14 +103,7 @@ fn convert_selected(app: &mut App, ids: &[String]) {
         }
         img.status = ConvertStatus::Converting;
         img.progress = 0.0;
-        tasks.push(ConvertTask {
-            id: id.clone(),
-            source: img.source.clone(),
-            conv,
-            down,
-            converter: app.converter.clone(),
-            cancel: token.clone(),
-        });
+        tasks.push(ConvertTask { id: id.clone(), source: img.source.clone(), series: img.series, conv, down, cancel: token.clone() });
     }
     app.mark_dirty();
     if !tasks.is_empty() {
@@ -186,7 +180,7 @@ pub fn ui(app: &mut App, ui: &mut egui::Ui, s: &mut State) {
     let clicked = button_row(
         ui,
         &[
-            ("Add Images", true, "Add microscopy images (any Bio-Formats format)"),
+            ("Add Images", true, "Add microscopy images; each image in a multi-image file (e.g. a Leica project) is added separately"),
             ("Select All", true, ""),
             ("Remove Selected", !s.sel.keys.is_empty(), "Remove from the workspace (files on disk are kept)"),
             ("Convert Selected", !s.sel.keys.is_empty(), "Convert to TIFF and make the downsampled overview"),
@@ -197,12 +191,7 @@ pub fn ui(app: &mut App, ui: &mut egui::Ui, s: &mut State) {
     match clicked {
         Some(0) => {
             if let Some(files) = rfd::FileDialog::new().set_title("Select your images").pick_files() {
-                let ws = app.ws.as_mut().unwrap();
-                let skipped = ws.add_images(&files);
-                if !skipped.is_empty() {
-                    log::warn!("already in the workspace: {}", skipped.join(", "));
-                }
-                app.mark_dirty();
+                add_images(app, files);
             }
         }
         Some(1) => s.sel.select_all(&ids),
@@ -221,6 +210,38 @@ pub fn ui(app: &mut App, ui: &mut egui::Ui, s: &mut State) {
     }
     ui.add_space(6.0);
     viewers(app, ui, s);
+}
+
+/// Adds files, one entry per image they contain. Files no reader recognises are
+/// reported instead of failing later at conversion.
+fn add_images(app: &mut App, files: Vec<std::path::PathBuf>) {
+    let mut entries = vec![];
+    let mut unreadable = vec![];
+    for f in files {
+        match imageio::probe(&f) {
+            Ok((format, series)) => {
+                log::info!("{}: {format}, {} image(s)", f.display(), series.len());
+                let multi = series.len() > 1;
+                for s in series {
+                    let name = multi.then(|| s.name.clone().unwrap_or_else(|| format!("series {}", s.index + 1)));
+                    entries.push(ImageEntry::new_series(f.clone(), s.index, name, multi));
+                }
+            }
+            Err(e) => unreadable.push(format!("{}: {e:#}", f.display())),
+        }
+    }
+    let skipped = app.ws.as_mut().unwrap().add_entries(entries);
+    if !skipped.is_empty() {
+        log::warn!("already in the workspace: {}", skipped.join(", "));
+    }
+    if !unreadable.is_empty() {
+        app.error(format!(
+            "These files could not be read (supported formats: {}):\n{}",
+            imageio::readable_formats().join(", "),
+            unreadable.join("\n")
+        ));
+    }
+    app.mark_dirty();
 }
 
 fn apply_channels(app: &mut App, s: &State) {
@@ -288,8 +309,7 @@ fn image_table(app: &mut App, ui: &mut egui::Ui, s: &mut State, ids: &[String], 
             let editable = img.status == ConvertStatus::Converted;
             let n = img.channel_count.max(1);
             row.col(|ui| {
-                ui.label(img.source.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default())
-                    .on_hover_text(img.source.display().to_string());
+                ui.label(Workspace::display_name(img)).on_hover_text(img.source.display().to_string());
             });
             for ch in [&mut img.registration_channel, &mut img.cell_channel, &mut img.co_channel] {
                 row.col(|ui| {

@@ -8,7 +8,7 @@ use microcount::core::analysis::render::Renderer;
 use microcount::core::analysis::{Algorithm, RegionSettings, Settings};
 use microcount::core::atlas::Atlas;
 use microcount::core::image::{Mask, Rect};
-use microcount::core::tiff::TiffFile;
+use microcount::core::imageio::ImageFile;
 use microcount::core::Cancel;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -57,9 +57,9 @@ fn run(args: &[String]) -> Result<()> {
     let out = arg(args, "--out").map(PathBuf::from);
 
     let t0 = Instant::now();
-    let tf = TiffFile::open(&path)?;
+    let tf = ImageFile::open(&path)?;
     let n_ch = tf.channel_count();
-    let (w, h) = (tf.pages[0].width, tf.pages[0].height);
+    let (w, h) = (tf.width(), tf.height());
     let rect = match arg(args, "--rect") {
         Some(s) => {
             let v = floats(s)?;
@@ -75,8 +75,8 @@ fn run(args: &[String]) -> Result<()> {
         n_pixels: (w * h) as u64,
         cell: if needs.cell { Some(pick(cell)?) } else { None },
         co: if needs.co { Some(pick(co)?) } else { None },
-        rgb: if needs.rgb { Some(tf.read_region::<u16>(0, rect)?) } else { None },
-        full_range: if tf.pages[0].bps == 8 { 255 } else { 65535 },
+        rgb: if needs.rgb { Some(tf.read_plane::<u16>(0, rect)?) } else { None },
+        full_range: tf.full_range(),
     };
     eprintln!("read {w}x{h} ({n_ch} channels) in {:.2}s", t0.elapsed().as_secs_f64());
     let settings = Settings::new(&rs, px);
@@ -105,7 +105,7 @@ fn run(args: &[String]) -> Result<()> {
         std::fs::create_dir_all(&dir)?;
         let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
         write_tables(&tables, &dir.join(format!("{stem}.xlsx")))?;
-        Renderer::new(&data).write_tiff(&dir.join(format!("{stem}_processed.tiff")))?;
+        Renderer::new(&data).write_tiff(&dir.join(format!("{stem}_processed.tiff")), px)?;
         eprintln!("wrote outputs to {}", dir.display());
     }
     Ok(())

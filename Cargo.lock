@@ -464,6 +464,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "bioformats"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "rayon",
+ "roxmltree",
+ "thiserror 2.0.21",
+ "uuid",
+ "weezl",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1911,11 +1923,11 @@ name = "microcount"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bioformats",
  "csv",
  "eframe",
  "egui",
  "egui_extras",
- "flate2",
  "image",
  "log",
  "rayon",
@@ -1923,7 +1935,6 @@ dependencies = [
  "rust_xlsxwriter",
  "serde",
  "serde_json",
- "weezl",
 ]
 
 [[package]]
@@ -2814,6 +2825,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "roxmltree"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "rust_xlsxwriter"
 version = "0.80.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3480,6 +3500,7 @@ version = "1.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cc1186384beb7dd8eedea376413fd654937285ea6c9cfbb928dc3043ea4b606"
 dependencies = [
+ "getrandom 0.4.3",
  "js-sys",
  "serde_core",
  "wasm-bindgen",
